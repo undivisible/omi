@@ -55,6 +55,8 @@ from models.product_memory import MemoryAccessPolicy, MemoryItemStatus, MemoryTi
 
 _FIXTURE_NOW = datetime(2026, 6, 24, 12, 0, tzinfo=timezone.utc)
 
+_FIXTURE_NOW = datetime(2026, 6, 24, 12, 0, tzinfo=timezone.utc)
+
 
 def _item(
     memory_id="mem_abc123",
