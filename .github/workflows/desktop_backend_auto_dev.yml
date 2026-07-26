@@ -4,7 +4,11 @@ on:
   push:
     branches: [ "main" ]
     paths:
-      - 'desktop/macos/Backend-Rust/**'
+      - 'backend/Dockerfile.desktop_backend'
+      - 'backend/desktop_backend.py'
+      - 'backend/agent_vm/**'
+      - 'backend/routers/desktop_*.py'
+      - 'backend/runtime_images.json'
       - 'backend/scripts/firebase_release_probe_token.py'
       - 'scripts/voice-provider-probe.sh'
   workflow_dispatch:
@@ -20,6 +24,7 @@ env:
   REGION: us-central1
   FIREBASE_AUTH_PROJECT_ID: based-hardware
   DEFAULT_DESKTOP_BACKEND_BASE_API_URL: https://desktop-backend-dt5lrfkkoa-uc.a.run.app
+  AGENT_GCS_BUCKET: ${{ vars.AGENT_GCS_BUCKET }}
 
 concurrency:
   group: desktop-backend-auto-dev
@@ -52,9 +57,6 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-
-      - name: Google Service Account
-        run: echo "${{ secrets.GCP_SERVICE_ACCOUNT }}" | base64 -d > ./desktop/macos/Backend-Rust/google-credentials.json
 
       - name: Resolve desktop OAuth base API URL
         id: desktop-base-api-url
@@ -90,27 +92,37 @@ jobs:
               raise SystemExit("DESKTOP_GOOGLE_CALENDAR_API_KEY does not look like a Google API key")
           PY
 
-      - name: Build and Push Docker image
-        uses: docker/build-push-action@v7
-        with:
-          context: ./desktop/macos/Backend-Rust
-          file: ./desktop/macos/Backend-Rust/Dockerfile
-          push: true
-          tags: gcr.io/${{ vars.GCP_PROJECT_ID }}/${{ env.SERVICE }}:latest
-          cache-from: type=registry,ref=gcr.io/${{ vars.GCP_PROJECT_ID }}/${{ env.SERVICE }}:buildcache
-          cache-to: type=registry,ref=gcr.io/${{ vars.GCP_PROJECT_ID }}/${{ env.SERVICE }}:buildcache,mode=max
+      - name: Build and publish Python images
+        env:
+          PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$AGENT_GCS_BUCKET"
+          desktop_image="gcr.io/$PROJECT_ID/$SERVICE:${GITHUB_SHA::7}"
+          agent_image="gcr.io/$PROJECT_ID/agent-vm:${GITHUB_SHA::7}"
+          docker build --tag "$desktop_image" --file backend/Dockerfile.desktop_backend .
+          python3 backend/scripts/runtime_image_contracts.py smoke \
+            --dockerfile backend/Dockerfile.desktop_backend --image "$desktop_image"
+          docker build --tag "$agent_image" --file backend/agent_vm/Dockerfile .
+          python3 backend/scripts/runtime_image_contracts.py smoke \
+            --dockerfile backend/agent_vm/Dockerfile --image "$agent_image"
+          docker push "$desktop_image"
+          docker push "$agent_image"
+          AGENT_VM_IMAGE="$agent_image" envsubst < backend/agent_vm/startup.sh \
+            | gcloud storage cp - "gs://$AGENT_GCS_BUCKET/startup.sh"
+          echo "DESKTOP_IMAGE=$desktop_image" >> "$GITHUB_ENV"
 
       - name: Deploy desktop-backend to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v3
         with:
           service: ${{ env.SERVICE }}
           region: ${{ env.REGION }}
-          image: gcr.io/${{ vars.GCP_PROJECT_ID }}/${{ env.SERVICE }}
+          image: ${{ env.DESKTOP_IMAGE }}
           flags: '--allow-unauthenticated'
           env_vars: |
             FIREBASE_PROJECT_ID=${{ env.FIREBASE_AUTH_PROJECT_ID }}
-            GOOGLE_APPLICATION_CREDENTIALS=/app/google-credentials.json
             BASE_API_URL=${{ steps.desktop-base-api-url.outputs.base_api_url }}
+            AGENT_GCS_BUCKET=${{ env.AGENT_GCS_BUCKET }}
             OMI_DESKTOP_RELEASE_SHA=${{ github.sha }}
             OMI_DESKTOP_RELEASE_CHANNEL=development
           secrets: |
