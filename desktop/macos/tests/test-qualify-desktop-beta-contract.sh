@@ -7,7 +7,6 @@ CORE_HARNESS="$SCRIPT_DIR/../scripts/desktop-core-harness.sh"
 PROFILE_PREP="$SCRIPT_DIR/../scripts/prepare-qualification-profile.sh"
 SWIFT_CACHE="$SCRIPT_DIR/../scripts/qualification-swift-cache.sh"
 LEASE_COMMAND="$SCRIPT_DIR/../scripts/qualification-lease-command.sh"
-LOCAL_PROOF="$SCRIPT_DIR/../scripts/qualification-local-proof.sh"
 APP_CONFIG="$SCRIPT_DIR/../scripts/app-config.sh"
 RUN_SH="$SCRIPT_DIR/../run.sh"
 WORKFLOW="$SCRIPT_DIR/../../../.github/workflows/desktop_qualify_beta.yml"
@@ -77,7 +76,11 @@ require_order "$QUALIFIER" \
   'if [[ "$GITHUB_ACTIONS_ARTIFACT" -eq 1 ]]'
 require_text 'terminate_qualification_desktop "$BUNDLE"'
 require_text '--json tagName,isDraft,isPrerelease,publishedAt,assets,body'
-require_text 'WORKTREE="$("$SCRIPT_DIR/qualification-swift-cache.sh" prepare "$SHA" "$REPO_ROOT")"'
+require_text '"$SCRIPT_DIR/qualification-swift-cache.sh" prepare'
+require_text 'QUALIFICATION_CACHE_LEASE_ID'
+require_text 'QUALIFICATION_CACHE_LEASE_TOKEN'
+require_text '"$SCRIPT_DIR/qualification-swift-cache.sh" release'
+require_text 'qualification-cache-reclaim.py' "$SWIFT_CACHE"
 require_text 'qualification-lease "$action"' "$LEASE_COMMAND"
 require_text 'acquire)' "$LEASE_COMMAND"
 require_text 'preflight-fault-cleanup)' "$LEASE_COMMAND"
@@ -154,26 +157,17 @@ require_text 'OMI_QUALIFICATION_FAULT_PREFLIGHT_REPORT' "$QUALIFIER"
 require_text '/phase-timings.json' "$SCRIPT_DIR/../../../.github/workflows/desktop_qualify_beta.yml"
 require_text '/fault-listener-preflight.json' "$SCRIPT_DIR/../../../.github/workflows/desktop_qualify_beta.yml"
 
-# CI runs the same behavioral offline proof before it dispatches the expensive
-# canonical job, retaining its redacted result without duplicating Tier-2.
-require_order "$WORKFLOW" \
-  'local-proof-m1:' \
-  'qualification-local-proof.sh \' \
-  '--offline \' \
-  '--fast \' \
-  'qualify-m1-studio:' \
-  'needs: local-proof-m1'
-require_text 'local-qualification-proof.json' "$WORKFLOW"
-require_text 'local-qualification-proof-fault-listener.json' "$WORKFLOW"
-require_text 'python3 "$KEYVALUE_PY" validate-tag "$RELEASE_TAG"' "$LOCAL_PROOF"
-require_text '"$LEASE_COMMAND" acquire' "$LOCAL_PROOF"
-require_text '"$FAULT_INJECTOR" start error' "$LOCAL_PROOF"
-require_text '"$LEASE_COMMAND" preflight-fault-cleanup' "$LOCAL_PROOF"
-require_text '"$LEASE_COMMAND" release' "$LOCAL_PROOF"
-if grep -Fq 'qualify-desktop-beta.sh' "$LOCAL_PROOF"; then
-  echo "FAIL: local pre-dispatch proof must not duplicate the full qualification suite" >&2
+# The canonical qualification owns the only M1 qualification lease lifecycle.
+# Its ordered preflight/final cleanup is retained as artifact evidence; no
+# standalone local-proof job may create an earlier duplicate lease.
+if grep -Fq 'local-proof-m1' "$WORKFLOW" || grep -Fq 'qualification-local-proof.sh' "$WORKFLOW"; then
+  echo "FAIL: qualification workflow must not retain a duplicate local-proof lifecycle" >&2
   exit 1
 fi
+require_order "$WORKFLOW" \
+  'qualify-m1-studio:' \
+  'fault-listener-preflight.json' \
+  'phase-timings.json'
 
 if [[ ! -x "$PROFILE_PREP" ]]; then
   echo "FAIL: missing executable qualification profile preparation helper" >&2
@@ -185,10 +179,6 @@ if [[ ! -x "$SWIFT_CACHE" ]]; then
 fi
 if [[ ! -x "$LEASE_COMMAND" ]]; then
   echo "FAIL: missing executable qualification lease command helper" >&2
-  exit 1
-fi
-if [[ ! -x "$LOCAL_PROOF" ]]; then
-  echo "FAIL: missing executable local qualification proof helper" >&2
   exit 1
 fi
 
