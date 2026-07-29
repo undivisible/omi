@@ -500,6 +500,7 @@ struct OnboardingBackButton: View {
       Button("Back", action: onboardingBack)
         .buttonStyle(OmiButtonStyle(.secondary))
         .accessibilityLabel("Back")
+        .padding(.trailing, 12)
     }
   }
 }
