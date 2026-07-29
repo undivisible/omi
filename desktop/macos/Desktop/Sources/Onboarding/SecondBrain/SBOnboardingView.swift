@@ -15,6 +15,8 @@ struct SBOnboardingView: View {
   @State private var selectedImportConnector: ImportConnector?
   /// Language step: false shows the detected default + Continue; true reveals the picker.
   @State private var languageChanging = false
+  @State private var showAIAssistants = false
+  @State private var showContextConnectors = false
 
   /// Same dune background as sign-in, for a continuous entry experience.
   private static let backgroundImage: NSImage? = {
@@ -527,11 +529,21 @@ struct SBOnboardingView: View {
   private var agentsWidget: some View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(spacing: 0) {
-        ForEach(Array(model.agentRows.enumerated()), id: \.element.id) { i, row in
-          connectRow(id: row.id, row.name, row.detail, state: model.agentStates[row.id] ?? "idle") {
-            model.connectAgent(row.id)
+        Button {
+          showAIAssistants.toggle()
+        } label: {
+          disclosureLabel("AI assistants", isExpanded: showAIAssistants)
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 12)
+        if showAIAssistants {
+          Divider().overlay(sb.ink(.w08))
+          ForEach(Array(model.agentRows.enumerated()), id: \.element.id) { i, row in
+            connectRow(id: row.id, row.name, row.detail, state: model.agentStates[row.id] ?? "idle") {
+              model.connectAgent(row.id)
+            }
+            if i < model.agentRows.count - 1 { Divider().overlay(sb.ink(.w08)) }
           }
-          if i < model.agentRows.count - 1 { Divider().overlay(sb.ink(.w08)) }
         }
       }
       .padding(.horizontal, 14)
@@ -544,16 +556,26 @@ struct SBOnboardingView: View {
   private var contextWidget: some View {
     VStack(alignment: .leading, spacing: 12) {
       VStack(spacing: 0) {
-        ForEach(Array(model.contextRows.enumerated()), id: \.element.id) { i, row in
-          connectRow(
-            id: row.id,
-            row.name,
-            model.contextDetails[row.id] ?? row.detail,
-            state: model.contextStates[row.id] ?? "idle"
-          ) {
-            connectContext(row.id)
+        Button {
+          showContextConnectors.toggle()
+        } label: {
+          disclosureLabel("Your context", isExpanded: showContextConnectors)
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 12)
+        if showContextConnectors {
+          Divider().overlay(sb.ink(.w08))
+          ForEach(Array(model.contextRows.enumerated()), id: \.element.id) { i, row in
+            connectRow(
+              id: row.id,
+              row.name,
+              model.contextDetails[row.id] ?? row.detail,
+              state: model.contextStates[row.id] ?? "idle"
+            ) {
+              connectContext(row.id)
+            }
+            if i < model.contextRows.count - 1 { Divider().overlay(sb.ink(.w08)) }
           }
-          if i < model.contextRows.count - 1 { Divider().overlay(sb.ink(.w08)) }
         }
       }
       .padding(.horizontal, 14)
@@ -561,6 +583,16 @@ struct SBOnboardingView: View {
       SBInkButton(title: "Continue", isDefaultAction: true) { model.answerContext() }
     }
     .frame(maxWidth: 380, alignment: .leading)
+  }
+
+  private func disclosureLabel(_ title: String, isExpanded: Bool) -> some View {
+    HStack {
+      Text(title).geist(size: 14, weight: .medium).foregroundStyle(sb.ink)
+      Spacer()
+      Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+        .font(.system(size: 11, weight: .semibold))
+        .foregroundStyle(sb.ink(.w45))
+    }
   }
 
   private func connectContext(_ id: String) {
