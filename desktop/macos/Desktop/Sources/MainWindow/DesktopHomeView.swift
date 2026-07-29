@@ -90,25 +90,16 @@ struct DesktopHomeView: View {
     selectedIndex == SidebarNavItem.settings.rawValue
   }
 
-  var body: some View {
+  private var desktopContent: some View {
     Group {
       if authState.isRestoringAuth {
         // State 0: Restoring auth session - show loading
-        VStack(spacing: OmiSpacing.lg) {
-          if let nsImage = Self.heroLogoImage {
-            Image(nsImage: nsImage)
-              .resizable()
-              .scaledToFit()
-              .frame(width: 64, height: 64)
+        Color.clear
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(OmiColors.backgroundPrimary)
+          .onAppear {
+            log("DesktopHomeView: Showing auth loading splash")
           }
-          ProgressView()
-            .scaleEffect(0.8)
-            .tint(.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear {
-          log("DesktopHomeView: Showing auth loading splash")
-        }
       } else if authState.sessionPhase == .recoveryRequired {
         SessionRecoveryView()
           .onAppear {
@@ -1125,92 +1116,96 @@ struct DesktopHomeView: View {
         }
       }
     }
-    .onReceive(NotificationCenter.default.publisher(for: .showTryAskingPopup)) { _ in
-      showTryAskingPopup = true
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToRewindSettings)) { _ in
-      // Set the section directly and navigate to settings
-      selectedSettingsSection = .rewind
-      selectedIndex = SidebarNavItem.settings.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToDeviceSettings)) { _ in
-      if let url = URL(string: "https://www.omi.me") {
-        NSWorkspace.shared.open(url)
+  }
+
+  var body: some View {
+    desktopContent
+      .onReceive(NotificationCenter.default.publisher(for: .showTryAskingPopup)) { _ in
+        showTryAskingPopup = true
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToTaskSettings)) { _ in
-      // Navigate to settings > advanced > task assistant subsection
-      selectedSettingsSection = .advanced
-      selectedIndex = SidebarNavItem.settings.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToFloatingBarSettings)) { _ in
-      selectedSettingsSection = .floatingBar
-      selectedIndex = SidebarNavItem.settings.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToAIChatSettings)) { _ in
-      selectedSettingsSection = .advanced
-      selectedIndex = SidebarNavItem.settings.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToRewind)) { _ in
-      // Navigate to Rewind page (index 6) - triggered by global hotkey Cmd+Option+R
-      log(
-        "DesktopHomeView: Received navigateToRewind notification, navigating to Rewind (index \(SidebarNavItem.rewind.rawValue))"
-      )
-      selectedIndex = SidebarNavItem.rewind.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToRewindNotes)) { _ in
-      selectedIndex = SidebarNavItem.rewind.rawValue
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-        NotificationCenter.default.post(name: .expandRewindTranscript, object: nil)
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToRewindSettings)) { _ in
+        // Set the section directly and navigate to settings
+        selectedSettingsSection = .rewind
+        selectedIndex = SidebarNavItem.settings.rawValue
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToChat)) { _ in
-      // Chat now lives on the Dashboard page.
-      selectedIndex = SidebarNavItem.dashboard.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToTasks)) { _ in
-      selectedIndex = SidebarNavItem.tasks.rawValue
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .navigateToSidebarItem)) { notification in
-      if let rawValue = notification.userInfo?["rawValue"] as? Int,
-        let item = SidebarNavItem(rawValue: rawValue)
-      {
-        if let destination = MemoryHubDestination.destination(for: item) {
-          memoryDestinationRawValue = destination.rawValue
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToDeviceSettings)) { _ in
+        if let url = URL(string: "https://www.omi.me") {
+          NSWorkspace.shared.open(url)
         }
-        selectedIndex = item.rawValue
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .desktopAutomationOpenConversationRequested)) { _ in
-      // Conversations now live behind the Memory menu. Route at
-      // the owning shell before the detail page mounts; its retained request is
-      // then consumed by ConversationsPage on appearance.
-      memoryDestinationRawValue = MemoryHubDestination.conversations.rawValue
-      selectedIndex = SidebarNavItem.conversations.rawValue
-    }
-    .onChange(of: selectedIndex) { oldValue, newValue in
-      // Track the previous index when navigating to settings
-      if newValue == SidebarNavItem.settings.rawValue
-        && oldValue != SidebarNavItem.settings.rawValue
-      {
-        previousIndexBeforeSettings = oldValue
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToTaskSettings)) { _ in
+        // Navigate to settings > advanced > task assistant subsection
+        selectedSettingsSection = .advanced
+        selectedIndex = SidebarNavItem.settings.rawValue
       }
-      // Only auto-refresh stores when their pages are visible
-      updateStoreActivity(for: newValue)
-    }
-    .onChange(of: useLegacyHomeDesign) { _, newValue in
-      OmiMotion.withGated(.easeInOut(duration: 0.2)) {
-        isSidebarCollapsed = !newValue
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToFloatingBarSettings)) { _ in
+        selectedSettingsSection = .floatingBar
+        selectedIndex = SidebarNavItem.settings.rawValue
       }
-    }
-    .onAppear {
-      isSidebarCollapsed = !useLegacyHomeDesign
-      updateStoreActivity(for: selectedIndex)
-      // Restore window width if the user quit with task chat panel open.
-      // The chat panel is never open on startup (showChatPanel defaults to false),
-      // but macOS restores the expanded window frame from the previous session.
-      restorePreChatWindowWidth()
-    }
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToAIChatSettings)) { _ in
+        selectedSettingsSection = .advanced
+        selectedIndex = SidebarNavItem.settings.rawValue
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToRewind)) { _ in
+        // Navigate to Rewind page (index 6) - triggered by global hotkey Cmd+Option+R
+        log(
+          "DesktopHomeView: Received navigateToRewind notification, navigating to Rewind (index \(SidebarNavItem.rewind.rawValue))"
+        )
+        selectedIndex = SidebarNavItem.rewind.rawValue
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToRewindNotes)) { _ in
+        selectedIndex = SidebarNavItem.rewind.rawValue
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+          NotificationCenter.default.post(name: .expandRewindTranscript, object: nil)
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToChat)) { _ in
+        // Chat now lives on the Dashboard page.
+        selectedIndex = SidebarNavItem.dashboard.rawValue
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToTasks)) { _ in
+        selectedIndex = SidebarNavItem.tasks.rawValue
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .navigateToSidebarItem)) { notification in
+        if let rawValue = notification.userInfo?["rawValue"] as? Int,
+          let item = SidebarNavItem(rawValue: rawValue)
+        {
+          if let destination = MemoryHubDestination.destination(for: item) {
+            memoryDestinationRawValue = destination.rawValue
+          }
+          selectedIndex = item.rawValue
+        }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .desktopAutomationOpenConversationRequested)) { _ in
+        // Conversations now live behind the Memory menu. Route at
+        // the owning shell before the detail page mounts; its retained request is
+        // then consumed by ConversationsPage on appearance.
+        memoryDestinationRawValue = MemoryHubDestination.conversations.rawValue
+        selectedIndex = SidebarNavItem.conversations.rawValue
+      }
+      .onChange(of: selectedIndex) { oldValue, newValue in
+        // Track the previous index when navigating to settings
+        if newValue == SidebarNavItem.settings.rawValue
+          && oldValue != SidebarNavItem.settings.rawValue
+        {
+          previousIndexBeforeSettings = oldValue
+        }
+        // Only auto-refresh stores when their pages are visible
+        updateStoreActivity(for: newValue)
+      }
+      .onChange(of: useLegacyHomeDesign) { _, newValue in
+        OmiMotion.withGated(.easeInOut(duration: 0.2)) {
+          isSidebarCollapsed = !newValue
+        }
+      }
+      .onAppear {
+        isSidebarCollapsed = !useLegacyHomeDesign
+        updateStoreActivity(for: selectedIndex)
+        // Restore window width if the user quit with task chat panel open.
+        // The chat panel is never open on startup (showChatPanel defaults to false),
+        // but macOS restores the expanded window frame from the previous session.
+        restorePreChatWindowWidth()
+      }
   }
 
   private func navigateHomeOnEscapeIfNeeded() {
