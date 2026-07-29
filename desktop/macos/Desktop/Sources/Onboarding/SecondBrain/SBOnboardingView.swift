@@ -421,7 +421,7 @@ struct SBOnboardingView: View {
     return VStack(alignment: .leading, spacing: 9) {
       ForEach(options, id: \.id) { opt in
         Button {
-          model.pickShortcut(opt.shortcut, isTalk: isTalk)
+          model.beginShortcutRecording(isTalk: isTalk)
         } label: {
           HStack(spacing: 8) {
             HStack(spacing: 5) {
@@ -429,7 +429,9 @@ struct SBOnboardingView: View {
             }
             Text(opt.sub).geist(size: 13).foregroundStyle(sb.ink(.w45))
             Spacer()
-            if model.chosenShortcut == opt.shortcut {
+            if model.shortcutRecording {
+              Text("Press a key").geist(size: 12).foregroundStyle(sb.ink(.w45))
+            } else if model.chosenShortcut == opt.shortcut {
               Text("✓").geist(size: 14).foregroundStyle(sb.ink(.w7))
             }
           }
@@ -442,7 +444,12 @@ struct SBOnboardingView: View {
         }
         .buttonStyle(.plain)
       }
-      if model.shortcutPicked {
+      if model.shortcutRecording {
+        Text("Press the shortcut you want to use.")
+          .geist(size: 15, weight: .medium)
+          .foregroundStyle(sb.ink(.w6))
+          .padding(.top, 6)
+      } else if model.shortcutPicked {
         VStack(alignment: .leading, spacing: 10) {
           HStack(spacing: 6) {
             ForEach(model.shortcutTokens, id: \.self) { tok in keycap(tok, active: model.shortcutPressed) }
@@ -450,7 +457,7 @@ struct SBOnboardingView: View {
           Text(
             model.shortcutPressed
               ? "Perfect, that works."
-              : (isTalk ? "Now hold it and say something." : "Now give it a tap.")
+              : "Now press it to test."
           )
           .geist(size: 15, weight: .medium)
           .foregroundStyle(model.shortcutPressed ? sb.ink(.w85) : sb.ink(.w6))
