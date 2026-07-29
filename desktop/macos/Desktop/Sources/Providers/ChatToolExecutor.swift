@@ -90,6 +90,7 @@ class ChatToolExecutor {
     "accessibility",
     "automation",
     "full_disk_access",
+    "location",
   ]
 
   nonisolated static var onboardingPermissionTypesDescription: String {
@@ -102,7 +103,8 @@ class ChatToolExecutor {
     notifications: Bool,
     accessibility: Bool,
     automation: Bool,
-    fullDiskAccess: Bool
+    fullDiskAccess: Bool,
+    location: Bool
   ) -> [String: String] {
     [
       "screen_recording": screenRecording ? "granted" : "not_granted",
@@ -111,6 +113,7 @@ class ChatToolExecutor {
       "accessibility": accessibility ? "granted" : "not_granted",
       "automation": automation ? "granted" : "not_granted",
       "full_disk_access": fullDiskAccess ? "granted" : "not_granted",
+      "location": location ? "granted" : "not_granted",
     ]
   }
 
@@ -1876,6 +1879,34 @@ class ChatToolExecutor {
         requiresRestart: true
       )
 
+    case "location":
+      switch await LocationPermissionService.shared.requestCurrentLocation() {
+      case .location(let coordinate):
+        return permissionJSON([
+          "ok": true,
+          "permission": type,
+          "status": "granted",
+          "latitude": coordinate.latitude,
+          "longitude": coordinate.longitude,
+          "requires_restart": false,
+        ])
+      case .denied:
+        return permissionRequestResult(
+          type: type,
+          granted: false,
+          pendingMessage: "User needs to allow Location for Omi in the system dialog or System Settings.",
+          requiresRestart: false
+        )
+      case .unavailable:
+        return permissionJSON([
+          "ok": false,
+          "permission": type,
+          "status": "unavailable",
+          "message": "Omi could not determine the current location.",
+          "requires_restart": false,
+        ])
+      }
+
     default:
       return permissionJSON([
         "ok": false,
@@ -1978,6 +2009,7 @@ class ChatToolExecutor {
     let accessibilityGranted = AXIsProcessTrusted()
     let automationStatus = AppState.queryAutomationPermissionStatus()
     let fullDiskAccessGranted = checkFullDiskAccessDirectly()
+    let locationGranted = LocationPermissionService.shared.isAuthorized
     guard
       isPermissionAuthorizationCurrent(
         expectedOwnerID,
@@ -1999,7 +2031,8 @@ class ChatToolExecutor {
       notifications: notificationsGranted,
       accessibility: accessibilityGranted,
       automation: automationStatus == noErr,
-      fullDiskAccess: fullDiskAccessGranted
+      fullDiskAccess: fullDiskAccessGranted,
+      location: locationGranted
     )
   }
 
@@ -2036,7 +2069,7 @@ class ChatToolExecutor {
         expectedOwnerID,
         authorizationSnapshot: authorizationSnapshot)
     else { return }
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
     let granted = AXIsProcessTrustedWithOptions(options)
     if !granted {
       _ = openPermissionPrivacySettings(
