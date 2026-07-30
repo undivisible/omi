@@ -100,6 +100,7 @@ strip_main_executable() {
   local before_arches
   local after_arches
   local saved_bytes
+  local backup_path
 
   executable_name="$(main_executable_name || true)"
   if [[ -z "$executable_name" ]]; then
@@ -119,6 +120,8 @@ strip_main_executable() {
 
   before_bytes="$(file_size_bytes "$executable_path")"
   before_arches="$(macho_arches "$executable_path")"
+  backup_path="$(mktemp "$MACOS_DIR/.omi-pre-strip.XXXXXX")"
+  cp -p "$executable_path" "$backup_path"
   chmod u+w "$executable_path" 2>/dev/null || true
   strip -x "$executable_path"
   after_bytes="$(file_size_bytes "$executable_path")"
@@ -132,6 +135,14 @@ strip_main_executable() {
     echo "ERROR: strip increased main executable size: $(human_bytes "$before_bytes") -> $(human_bytes "$after_bytes")" >&2
     exit 1
   fi
+
+  if command -v dyld_info >/dev/null 2>&1 \
+    && ! dyld_info -dependents "$executable_path" >/dev/null 2>&1; then
+    mv -f "$backup_path" "$executable_path"
+    echo "Skipping main app executable strip: invalid Mach-O output"
+    return 0
+  fi
+  rm -f "$backup_path"
 
   saved_bytes=$((before_bytes - after_bytes))
   echo "Stripped main app executable: $(human_bytes "$before_bytes") -> $(human_bytes "$after_bytes") (saved $(human_bytes "$saved_bytes"))"

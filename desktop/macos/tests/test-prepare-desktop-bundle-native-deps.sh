@@ -47,6 +47,14 @@ perl -e 'truncate $ARGV[0], $ARGV[1] or die "truncate: $!"' "$target" "$after"
 EOF
 chmod +x "$fakebin/strip"
 
+cat > "$fakebin/dyld_info" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${OMI_TEST_INVALID_STRIP:-0}" == "1" ]]; then
+  exit 1
+fi
+EOF
+chmod +x "$fakebin/dyld_info"
+
 head -c 4096 /dev/zero > "$main_binary"
 chmod +x "$main_binary"
 
@@ -62,6 +70,20 @@ if ! grep -q "Stripped main app executable:" <<< "$output"; then
 fi
 if ! grep -q "Prepared desktop bundle native dependencies" <<< "$output"; then
   fail "prepare script did not complete successfully"
+fi
+
+head -c 4096 /dev/zero > "$main_binary"
+before="$(wc -c < "$main_binary" | tr -d ' ')"
+output="$(PATH="$fakebin:$PATH" OMI_TEST_INVALID_STRIP=1 "$MACOS_DIR/scripts/prepare-desktop-bundle-native-deps.sh" "$app_bundle")"
+after="$(wc -c < "$main_binary" | tr -d ' ')"
+if [ "$after" -ne "$before" ]; then
+  fail "invalid strip output was not restored: before=$before after=$after"
+fi
+if [ ! -x "$main_binary" ]; then
+  fail "restored executable lost its execute permission"
+fi
+if ! grep -q "Skipping main app executable strip: invalid Mach-O output" <<< "$output"; then
+  fail "prepare script did not report invalid Mach-O strip output"
 fi
 
 echo "prepare-desktop-bundle-native-deps tests passed"

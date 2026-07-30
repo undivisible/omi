@@ -214,6 +214,12 @@ while IFS= read -r -d '' candidate; do
     continue
   fi
 
+  if command -v dyld_info >/dev/null 2>&1 \
+    && ! dyld_info -dependents "$candidate" >/dev/null 2>&1; then
+    report_error "$candidate has malformed Mach-O load commands"
+    continue
+  fi
+
   checked=$((checked + 1))
   candidate_rpaths=()
   while IFS= read -r rpath; do
