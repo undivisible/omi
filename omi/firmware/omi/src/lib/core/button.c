@@ -10,6 +10,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/pm/device_runtime.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/poweroff.h>
 
 #include "haptic.h"
@@ -66,6 +67,7 @@ static const struct device *const buttons = DEVICE_DT_GET(DT_ALIAS(buttons));
 static const struct gpio_dt_spec usr_btn = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(usr_btn), gpios, {0});
 
 static bool was_pressed = false;
+static atomic_t shutdown_started;
 
 // Using GPIO callback due to the lower priority of the input subsystem vs. storage.c's thread that prevents the
 // callback from working properly.
@@ -351,6 +353,10 @@ FSM_STATE_T get_current_button_state()
 
 void turnoff_all()
 {
+    if (!atomic_cas(&shutdown_started, 0, 1)) {
+        return;
+    }
+
     int rc;
 
     // Immediate feedback: LED off and haptic

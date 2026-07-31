@@ -815,6 +815,7 @@ static void _transport_connected(struct bt_conn *conn, uint8_t err)
     err = bt_conn_get_info(conn, &info);
     if (err) {
         LOG_ERR("Failed to get connection info (err %d)", err);
+        bt_conn_unref(conn);
         return;
     }
 
@@ -892,6 +893,9 @@ static void _transport_disconnected(struct bt_conn *conn, uint8_t err)
     mtu_recheck_attempts = 0;
 
     is_connected = false;
+#ifdef CONFIG_OMI_ENABLE_CAPTURE_LED
+    is_capturing = false;
+#endif
 
     if (IS_ENABLED(CONFIG_SHELL_BT_NUS)) {
         shell_bt_nus_disable();
