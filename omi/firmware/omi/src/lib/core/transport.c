@@ -43,6 +43,8 @@ static const struct gpio_dt_spec rfsw_en = GPIO_DT_SPEC_GET_OR(DT_NODELABEL(rfsw
 extern struct bt_gatt_service storage_service;
 extern bool storage_is_on;
 static bool storage_full_warned = false;
+static atomic_t offline_recording_seen;
+static atomic_t offline_recording_last_ms;
 #endif
 
 extern bool is_connected;
@@ -1370,6 +1372,9 @@ static uint16_t buffer_offset = 0;
 static uint8_t storage_temp_data[MAX_WRITE_SIZE];
 bool write_to_storage(void)
 {
+    atomic_set(&offline_recording_seen, 1);
+    atomic_set(&offline_recording_last_ms, (atomic_val_t) k_uptime_get_32());
+
     uint8_t *buffer = tx_buffer + 2;
     uint8_t packet_size = (uint8_t) (tx_buffer_size + OPUS_PREFIX_LENGTH);
 
@@ -1713,6 +1718,15 @@ bool transport_is_audio_subscribed(void)
     bt_conn_unref(conn);
     return subscribed;
 }
+
+#ifdef CONFIG_OMI_ENABLE_OFFLINE_STORAGE
+bool transport_offline_recording_active(void)
+{
+    uint32_t now = k_uptime_get_32();
+    uint32_t last = (uint32_t) atomic_get(&offline_recording_last_ms);
+    return atomic_get(&offline_recording_seen) && now - last < 2000U;
+}
+#endif
 
 int broadcast_audio_packets(uint8_t *buffer, size_t size)
 {

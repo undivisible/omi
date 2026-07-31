@@ -45,6 +45,10 @@ struct bt_conn *get_current_connection();
  */
 bool transport_is_audio_subscribed(void);
 
+#ifdef CONFIG_OMI_ENABLE_OFFLINE_STORAGE
+bool transport_offline_recording_active(void);
+#endif
+
 /**
  * @brief Acquire / release a shared BLE TX-throttle slot.
  *

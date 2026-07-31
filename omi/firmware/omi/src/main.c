@@ -201,7 +201,7 @@ static void update_idle_sleep(void)
     // Streaming audio to a subscribed central, or charging, holds the device awake.
     bool active = is_charging || (is_connected && transport_is_audio_subscribed());
 #ifdef CONFIG_OMI_ENABLE_OFFLINE_STORAGE
-    active = active || (is_connected && storage_transfer_active());
+    active = active || storage_transfer_active() || transport_offline_recording_active();
 #endif
 
     if (active) {
