@@ -2,14 +2,16 @@ import Foundation
 
 enum DesktopBackendEnvironment {
   static let productionPythonAPIURL = "https://api.omi.me/"
+  static let productionRustBackendURL = "https://desktop-backend-hhibjajaja-uc.a.run.app/"
   static let developmentPythonAPIURL = "https://api.omiapi.com/"
   static let developmentRustBackendURL = "https://desktop-backend-dt5lrfkkoa-uc.a.run.app/"
+  /// Public web share origin (conversation / chat / task links). Override with ``OMI_SHARE_BASE_URL``.
+  static let productionShareBaseURL = "https://h.omi.me"
 
   static var shouldUseDevelopmentBackends: Bool {
     shouldUseDevelopmentBackends(
       bundleIdentifier: AppBuild.bundleIdentifier,
       updateChannel: AppBuild.currentUpdateChannel,
-      forceOverride: currentEnvironmentValue("OMI_FORCE_DEV_BACKENDS"),
       externalPreviewBackend: AppBuild.externalPreviewBackend
     )
   }
@@ -17,7 +19,6 @@ enum DesktopBackendEnvironment {
   static func shouldUseDevelopmentBackends(
     bundleIdentifier: String,
     updateChannel: String,
-    forceOverride: String? = nil,
     externalPreviewBackend: AppBuild.ExternalPreviewBackend? = nil
   ) -> Bool {
     // External previews opt into their backend through signed bundle metadata. They must
@@ -27,19 +28,41 @@ enum DesktopBackendEnvironment {
       return externalPreviewBackend == .development
     }
 
+    // Beta is the production-account dogfood channel: it uses the development
+    // serving plane while retaining production Auth/Firebase/Firestore. This is
+    // an identity-bound routing rule, never an update-channel or environment
+    // override. Stable remains pinned to the production serving plane.
+    if bundleIdentifier == AppBuild.betaProductionBundleIdentifier {
+      return true
+    }
+
     // Named/dev bundles route to the dev backend by default. Explicit launch
     // URLs still win below so local harnesses and intentionally-targeted tests
-    // remain possible. The Omi Beta app is a production-family artifact, not a
-    // dev bundle: it falls through to channel-based routing like stable.
+    // remain possible.
     if !AppBuild.productionFamilyBundleIdentifiers.contains(bundleIdentifier) {
       return true
     }
 
-    if isAffirmative(forceOverride) {
-      return true
-    }
-
     return false
+  }
+
+  static var shouldUseProductionAuth: Bool {
+    shouldUseProductionAuth(bundleIdentifier: AppBuild.bundleIdentifier)
+  }
+
+  static func shouldUseProductionAuth(bundleIdentifier: String) -> Bool {
+    // The shared Firebase project and registered OAuth callback live on the
+    // production authority. Beta must never inherit a dev auth override while
+    // its data-serving endpoints intentionally target development.
+    AppBuild.productionFamilyBundleIdentifiers.contains(bundleIdentifier)
+  }
+
+  static var shouldForceDevelopmentServingEndpoints: Bool {
+    shouldForceDevelopmentServingEndpoints(bundleIdentifier: AppBuild.bundleIdentifier)
+  }
+
+  static func shouldForceDevelopmentServingEndpoints(bundleIdentifier: String) -> Bool {
+    bundleIdentifier == AppBuild.betaProductionBundleIdentifier
   }
 
   static func pythonBaseURL(
@@ -53,22 +76,36 @@ enum DesktopBackendEnvironment {
 
   static func pythonBaseURL(
     useDevelopmentBackends: Bool,
+    bundleIdentifier: String = AppBuild.bundleIdentifier,
     environmentValue: String?
   ) -> String {
+    // A production-family app must not allow a launch environment or bundled
+    // config to switch its customer data plane. Development identities retain
+    // their explicit override seam for local and signed-preview testing.
+    if shouldForceDevelopmentServingEndpoints(bundleIdentifier: bundleIdentifier) {
+      return developmentPythonAPIURL
+    }
+    if shouldUseProductionAuth(bundleIdentifier: bundleIdentifier) {
+      return productionPythonAPIURL
+    }
+    if !useDevelopmentBackends {
+      return productionPythonAPIURL
+    }
     if let url = normalizedURL(environmentValue) {
       return url
     }
 
-    if useDevelopmentBackends {
-      return developmentPythonAPIURL
-    }
-
-    return productionPythonAPIURL
+    return developmentPythonAPIURL
   }
 
   static func authBaseURL(
+    useDevelopmentBackends: Bool = shouldUseDevelopmentBackends,
+    bundleIdentifier: String = AppBuild.bundleIdentifier,
     environmentValue: String? = currentEnvironmentValue("OMI_AUTH_API_URL")
   ) -> String {
+    if shouldUseProductionAuth(bundleIdentifier: bundleIdentifier) || !useDevelopmentBackends {
+      return productionPythonAPIURL
+    }
     if let url = normalizedURL(environmentValue) {
       return url
     }
@@ -92,9 +129,19 @@ enum DesktopBackendEnvironment {
 
   static func rustBackendURL(
     useDevelopmentBackends: Bool,
+    bundleIdentifier: String = AppBuild.bundleIdentifier,
     environmentValue: String?,
     launchEnvironmentValue: String?
   ) -> String {
+    if shouldForceDevelopmentServingEndpoints(bundleIdentifier: bundleIdentifier) {
+      return developmentRustBackendURL
+    }
+    if shouldUseProductionAuth(bundleIdentifier: bundleIdentifier) {
+      return productionRustBackendURL
+    }
+    if !useDevelopmentBackends {
+      return productionRustBackendURL
+    }
     if let url = normalizedURL(environmentValue) {
       return url
     }
@@ -103,11 +150,41 @@ enum DesktopBackendEnvironment {
       return url
     }
 
-    if useDevelopmentBackends {
-      return developmentRustBackendURL
-    }
+    return developmentRustBackendURL
+  }
 
-    return ""
+  /// Public share origin used when minting conversation links (#4339).
+  /// Matches backend ``OMI_SHARE_BASE_URL`` (default ``https://h.omi.me``).
+  static func shareBaseURL(
+    environmentValue: String? = currentEnvironmentValue("OMI_SHARE_BASE_URL")
+  ) -> String {
+    guard var raw = environmentValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+      !raw.isEmpty
+    else {
+      return productionShareBaseURL
+    }
+    if !raw.contains("://") {
+      raw = "https://\(raw)"
+    }
+    while raw.hasSuffix("/") {
+      raw.removeLast()
+    }
+    guard let url = URL(string: raw),
+      let scheme = url.scheme?.lowercased(),
+      ["http", "https"].contains(scheme),
+      let host = url.host,
+      !host.isEmpty
+    else {
+      return productionShareBaseURL
+    }
+    return raw
+  }
+
+  static func conversationShareURL(
+    id: String,
+    environmentValue: String? = currentEnvironmentValue("OMI_SHARE_BASE_URL")
+  ) -> String {
+    "\(shareBaseURL(environmentValue: environmentValue))/conversations/\(id)"
   }
 
   static func applyReleaseChannelDefaults() {
@@ -134,11 +211,5 @@ enum DesktopBackendEnvironment {
       return nil
     }
     return string
-  }
-
-  private static func isAffirmative(_ value: String?) -> Bool {
-    guard let value else { return false }
-    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    return normalized == "1" || normalized == "true" || normalized == "yes"
   }
 }

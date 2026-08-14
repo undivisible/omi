@@ -1,4 +1,6 @@
 import 'package:omi/utils/platform/platform_manager.dart';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import 'package:omi/backend/http/api/speech_profile.dart';
@@ -8,81 +10,6 @@ import 'package:omi/app_globals.dart';
 import 'package:omi/pages/settings/language_selection_dialog.dart';
 import 'package:omi/providers/user_provider.dart';
 import 'package:omi/utils/logger.dart';
-
-/// Base language codes eligible for live multi-language auto-detection.
-/// Mirrors the backend live STT capability policy
-/// (backend/config/stt_provider_policy.py MODULATE_SUPPORTED_LANGUAGES, #10022);
-/// regional variants ("pt-BR") are normalized to their base code before lookup.
-const multiLanguageSupported = {
-  'multi',
-  'af',
-  'ar',
-  'az',
-  'be',
-  'bg',
-  'bn',
-  'bs',
-  'ca',
-  'cs',
-  'cy',
-  'da',
-  'de',
-  'el',
-  'en',
-  'es',
-  'et',
-  'eu',
-  'fa',
-  'fi',
-  'fr',
-  'gl',
-  'gu',
-  'he',
-  'hi',
-  'hr',
-  'hu',
-  'id',
-  'it',
-  'ja',
-  'kk',
-  'kn',
-  'ko',
-  'lt',
-  'lv',
-  'mk',
-  'ml',
-  'mr',
-  'ms',
-  'nl',
-  'no',
-  'pa',
-  'pl',
-  'pt',
-  'ro',
-  'ru',
-  'sk',
-  'sl',
-  'sq',
-  'sr',
-  'sv',
-  'sw',
-  'ta',
-  'te',
-  'th',
-  'tl',
-  'tr',
-  'uk',
-  'ur',
-  'vi',
-  'zh',
-};
-
-/// Whether a (possibly regional) language code may enter live multi-language
-/// mode, matching the backend's normalized policy check.
-bool supportsLiveMultilingualMode(String languageCode) {
-  final base = languageCode.split('-').first.split('_').first.toLowerCase();
-  return multiLanguageSupported.contains(base);
-}
 
 class HomeProvider extends ChangeNotifier {
   int _sessionGeneration = 0;
@@ -102,8 +29,9 @@ class HomeProvider extends ChangeNotifier {
   String userPrimaryLanguage = SharedPreferencesUtil().userPrimaryLanguage;
   bool hasSetPrimaryLanguage = SharedPreferencesUtil().hasSetPrimaryLanguage;
 
-  // Available languages ordered by popularity
-  final Map<String, String> availableLanguages = {
+  /// Offline floor for the served list. Not dead code — a first run with no
+  /// network shows this.
+  static const Map<String, String> _bundledLanguages = {
     // Top languages first
     'English': 'en',
     'English (US)': 'en-US',
@@ -176,6 +104,47 @@ class HomeProvider extends ChangeNotifier {
     'Urdu': 'ur',
     'Vietnamese': 'vi',
   };
+
+  Map<String, String>? _serverLanguages;
+
+  Map<String, String> get availableLanguages => _serverLanguages ?? _bundledLanguages;
+
+  /// Cached list first so the UI never waits, then the server's. A failed fetch
+  /// leaves whatever the picker already had.
+  Future<void> loadAvailableLanguages({Future<Map<String, String>?> Function()? fetch}) async {
+    final cached = SharedPreferencesUtil().cachedAvailableLanguages;
+    if (cached.isNotEmpty) {
+      final restored = _decodeLanguages(cached);
+      if (restored != null) {
+        _serverLanguages = restored;
+        notifyListeners();
+      }
+    }
+
+    final generation = _sessionGeneration;
+    Map<String, String>? fetched;
+    try {
+      fetched = await (fetch ?? getAvailableLanguages)();
+    } catch (e) {
+      Logger.debug('Error loading available languages: $e');
+      return;
+    }
+    if (fetched == null || fetched.isEmpty || generation != _sessionGeneration) return;
+
+    SharedPreferencesUtil().cachedAvailableLanguages = jsonEncode(fetched);
+    _serverLanguages = fetched;
+    notifyListeners();
+  }
+
+  static Map<String, String>? _decodeLanguages(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map || decoded.isEmpty) return null;
+      return {for (final entry in decoded.entries) entry.key as String: entry.value as String};
+    } catch (_) {
+      return null;
+    }
+  }
 
   HomeProvider() {
     chatFieldFocusNode.addListener(_onFocusChange);
@@ -270,6 +239,17 @@ class HomeProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Loads the picker options, then runs primary-language setup — but only if
+  /// the session survived the request. setupUserPrimaryLanguage captures the
+  /// generation when it starts, which is too late to notice a sign-out that
+  /// happened while the options were still loading.
+  Future<void> loadLanguagesThenSetupPrimary({Future<Map<String, String>?> Function()? fetch}) async {
+    final generation = _sessionGeneration;
+    await loadAvailableLanguages(fetch: fetch);
+    if (generation != _sessionGeneration) return;
+    await setupUserPrimaryLanguage();
+  }
+
   Future<void> setupUserPrimaryLanguage() async {
     if (SharedPreferencesUtil().hasSetPrimaryLanguage && SharedPreferencesUtil().userPrimaryLanguage.isNotEmpty) {
       return;
@@ -316,17 +296,17 @@ class HomeProvider extends ChangeNotifier {
 
   Future<bool> updateUserPrimaryLanguage(String languageCode, {UserProvider? userProvider}) async {
     try {
-      final success = await setUserPrimaryLanguage(languageCode);
-      if (success) {
+      final serverSingleLanguageMode = await setUserPrimaryLanguage(languageCode);
+      if (serverSingleLanguageMode != null) {
         userPrimaryLanguage = languageCode;
         hasSetPrimaryLanguage = true;
         SharedPreferencesUtil().userPrimaryLanguage = languageCode;
         SharedPreferencesUtil().hasSetPrimaryLanguage = true;
         PlatformManager.instance.analytics.setUserAttribute('Primary Language', languageCode);
 
-        // Backend auto-sets single_language_mode — sync local state to match
-        final singleLanguageMode = !supportsLiveMultilingualMode(languageCode);
-        userProvider?.updateSingleLanguageModeLocally(singleLanguageMode);
+        // The server decides single_language_mode from the live STT policy
+        // (#10022); local state mirrors its response, never a client-side list.
+        userProvider?.updateSingleLanguageModeLocally(serverSingleLanguageMode);
 
         notifyListeners();
         return true;
@@ -339,7 +319,14 @@ class HomeProvider extends ChangeNotifier {
   }
 
   String getLanguageName(String code) {
-    return availableLanguages.entries.firstWhere((element) => element.value == code).key;
+    // A stored code can outlive the list that offered it.
+    for (final entry in availableLanguages.entries) {
+      if (entry.value == code) return entry.key;
+    }
+    for (final entry in _bundledLanguages.entries) {
+      if (entry.value == code) return entry.key;
+    }
+    return code;
   }
 
   Future setUserPeople() async {

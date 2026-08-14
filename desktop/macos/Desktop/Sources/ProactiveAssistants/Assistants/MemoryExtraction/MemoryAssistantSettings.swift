@@ -189,6 +189,7 @@ class MemoryAssistantSettings {
     set {
       let isCustom = newValue != MemoryAssistantSettings.defaultAnalysisPrompt
       UserDefaults.standard.set(newValue, forKey: analysisPromptKey)
+      SettingsSyncManager.recordLocalPromptOwner("memory")
       let previewLength = min(newValue.count, 50)
       let preview = String(newValue.prefix(previewLength)) + (newValue.count > 50 ? "..." : "")
       log("Memory analysis prompt updated (\(newValue.count) chars, custom: \(isCustom)): \(preview)")
@@ -197,14 +198,24 @@ class MemoryAssistantSettings {
   }
 
   /// Interval between memory extraction analyses in seconds
+  ///
+  /// Non-positive values are refused on write and healed on read, for the reason spelled out on
+  /// `TaskAssistantSettings.extractionInterval`: normalising only on read let the store hold a
+  /// number the app never honoured, and the next push to the account overwrote the account's own
+  /// value with the local default.
   var extractionInterval: TimeInterval {
     get {
-      let value = UserDefaults.standard.double(forKey: extractionIntervalKey)
-      return value > 0 ? value : defaultExtractionInterval
+      let stored = UserDefaults.standard.double(forKey: extractionIntervalKey)
+      guard stored > 0 else {
+        UserDefaults.standard.set(defaultExtractionInterval, forKey: extractionIntervalKey)
+        return defaultExtractionInterval
+      }
+      return stored
     }
     set {
-      UserDefaults.standard.set(newValue, forKey: extractionIntervalKey)
-      log("Memory extraction interval updated to \(newValue) seconds")
+      let interval = newValue > 0 ? newValue : defaultExtractionInterval
+      UserDefaults.standard.set(interval, forKey: extractionIntervalKey)
+      log("Memory extraction interval updated to \(interval) seconds")
       NotificationCenter.default.post(name: .assistantSettingsDidChange, object: nil)
     }
   }
@@ -229,6 +240,38 @@ class MemoryAssistantSettings {
       UserDefaults.standard.set(newValue, forKey: notificationsEnabledKey)
       NotificationCenter.default.post(name: .assistantSettingsDidChange, object: nil)
     }
+  }
+
+  // MARK: - User-Intent Setting Changes (telemetry)
+
+  /// Apply an explicit user-initiated change to one of the two telemetry-gated
+  /// settings (`enabled` / `notifications_enabled`), persisting it and recording
+  /// the bounded `Memory Assistant Setting Changed` event only when the persisted
+  /// value actually changes. Returns `true` when the change was real and the
+  /// event was recorded, `false` when it was a no-op (so callers/tests can tell).
+  ///
+  /// This is the **only** path that emits the activation-denominator event. The
+  /// raw property setters (`isEnabled` / `notificationsEnabled`) are deliberately
+  /// silent so that remote settings sync (`SettingsSyncManager.applyRemoteSettings`),
+  /// migrations/defaults, and programmatic resets cannot create denominator
+  /// events. Call this exclusively from explicit user-intent sites (UI toggles,
+  /// intentional user commands).
+  @discardableResult
+  func applyUserSettingChange(_ setting: MemoryAssistantTelemetry.Setting, value: Bool) -> Bool {
+    let previous: Bool
+    switch setting {
+    case .enabled:
+      previous = isEnabled
+      isEnabled = value
+    case .notificationsEnabled:
+      previous = notificationsEnabled
+      notificationsEnabled = value
+    }
+    guard MemoryAssistantTelemetry.settingChangeIsPersistedChange(oldValue: previous, newValue: value) else {
+      return false
+    }
+    AnalyticsManager.shared.memoryAssistantSettingChanged(setting: setting, value: value)
+    return true
   }
 
   /// Apps excluded from memory extraction (user's custom list, on top of the shared built-in list)

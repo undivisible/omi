@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:omi/backend/preferences.dart';
 import 'package:omi/models/sync_state.dart';
 import 'package:omi/pages/conversations/local_storage_page.dart';
+import 'package:omi/pages/conversations/sync_cooldown_copy.dart';
 import 'package:omi/pages/conversations/private_cloud_sync_page.dart';
 import 'package:omi/pages/conversations/widgets/device_storage_card.dart';
 import 'package:omi/providers/device_provider.dart';
@@ -72,17 +73,17 @@ class _AutoSyncPageState extends State<AutoSyncPage> {
               style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
             ),
             leading: IconButton(
-              icon: FaIcon(FontAwesomeIcons.chevronLeft, color: Colors.white, size: 18),
+              icon: const FaIcon(FontAwesomeIcons.chevronLeft, color: Colors.white, size: 18),
               onPressed: () => Navigator.of(context).pop(),
             ),
             actions: [
               IconButton(
-                icon: FaIcon(FontAwesomeIcons.circleInfo, color: Color(0xFF8E8E93), size: 18),
+                icon: const FaIcon(FontAwesomeIcons.circleInfo, color: Color(0xFF8E8E93), size: 18),
                 onPressed: () => _showInfoSheet(context),
               ),
               if (syncProvider.clearableWalsCount > 0)
                 IconButton(
-                  icon: FaIcon(FontAwesomeIcons.ellipsis, color: Color(0xFF8E8E93), size: 18),
+                  icon: const FaIcon(FontAwesomeIcons.ellipsis, color: Color(0xFF8E8E93), size: 18),
                   onPressed: () => _showManageStorageSheet(context, syncProvider),
                 ),
             ],
@@ -176,16 +177,14 @@ class _AutoSyncPageState extends State<AutoSyncPage> {
       }
       action = _statusActionPill(l.cancel, Colors.redAccent, () => _confirmCancel(context, p));
     } else if (p.isRateLimited) {
-      title = switch (p.rateLimitReason) {
-        RateLimitReason.backendBusy => l.syncCardBackendBusy,
-        RateLimitReason.backfillPaced => l.syncCardReadyCount(readyToBackUp),
-        _ => l.syncCardRateLimited,
-      };
+      title = syncCooldownTitle(p.rateLimitReason, l);
       titleColor = Colors.orangeAccent;
     } else if (uploaded > 0) {
       // Uploads finished, reconciler is resolving jobs in the background.
       title = l.syncCardProcessing;
-      progressText = l.syncCardProgressOf(uploaded, uploaded + readyToBackUp);
+      // Uploaded WAL counts are queue state, not server segment progress. A
+      // localized background hint avoids presenting them as a completion meter.
+      progressText = l.syncProcessingBackgroundHint;
     } else if (attention > 0) {
       title = l.syncCardNeedsAttention(attention);
       titleColor = Colors.orangeAccent;
@@ -281,7 +280,7 @@ class _AutoSyncPageState extends State<AutoSyncPage> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.15), shape: BoxShape.circle),
-              child: Center(child: FaIcon(FontAwesomeIcons.check, color: Colors.green, size: 14)),
+              child: const Center(child: FaIcon(FontAwesomeIcons.check, color: Colors.green, size: 14)),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -311,11 +310,13 @@ class _AutoSyncPageState extends State<AutoSyncPage> {
       ),
       child: Row(
         children: [
-          FaIcon(FontAwesomeIcons.circleExclamation, color: Colors.redAccent, size: 16),
+          const FaIcon(FontAwesomeIcons.circleExclamation, color: Colors.redAccent, size: 16),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              syncState.errorMessage ?? context.l10n.syncFailed,
+              SyncProvider.isPendingUploadError(syncState.errorMessage)
+                  ? context.l10n.syncStatusFailed
+                  : syncState.errorMessage ?? context.l10n.syncFailed,
               style: const TextStyle(color: Colors.redAccent, fontSize: 13),
             ),
           ),
@@ -682,6 +683,8 @@ class _AutoSyncPageState extends State<AutoSyncPage> {
         return (Colors.redAccent, FontAwesomeIcons.circleExclamation, context.l10n.syncStatusFailed);
       case WalSyncDisplayState.corrupted:
         return (Colors.redAccent, FontAwesomeIcons.triangleExclamation, context.l10n.syncStatusFileUnavailable);
+      case WalSyncDisplayState.outsideRecoveryWindow:
+        return (Colors.redAccent, FontAwesomeIcons.clockRotateLeft, context.l10n.syncStatusTooOld);
     }
   }
 

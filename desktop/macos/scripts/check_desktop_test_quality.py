@@ -44,9 +44,9 @@ TEST_ROOT = "desktop/macos/Desktop/Tests"
 
 # Pinned debt ceilings. These may only decrease. Escaped sites are not counted.
 # Run with --print after improving tests, then lower both relevant values.
-SOURCE_INSPECTION_FILE_BASELINE = 56
-SOURCE_INSPECTION_SITE_BASELINE = 155
-WALL_CLOCK_WAIT_BASELINE = 19
+SOURCE_INSPECTION_FILE_BASELINE = 54
+SOURCE_INSPECTION_SITE_BASELINE = 147
+WALL_CLOCK_WAIT_BASELINE = 16
 
 MIN_REASON_LENGTH = 12
 

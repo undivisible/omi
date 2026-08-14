@@ -7,7 +7,7 @@ import threading
 import urllib.parse
 import wave as _wave
 from enum import Enum
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, cast
+from typing import Any, Awaitable, Callable, Dict, Final, List, Optional, Tuple, cast
 
 import numpy as np
 import websockets
@@ -15,10 +15,10 @@ from deepgram import DeepgramClient, DeepgramClientOptions, LiveTranscriptionEve
 from deepgram.clients.live.v1 import LiveOptions
 
 from config.stt_provider_policy import (
-    DEEPGRAM_SELF_HOSTED_PROVIDER,
     MODULATE_PROVIDER,
     PARAKEET_PROVIDER,
     STTServingSurface,
+    deepgram_provider_for_runtime,
     default_models_for_surface,
     modulate_supports_language,
     normalized_stt_language,
@@ -27,7 +27,9 @@ from config.stt_provider_policy import (
     supports_live_multilingual_mode,
 )
 from utils.async_tasks import create_named_task
+from utils.byok import get_byok_key
 from utils.executors import sync_executor, run_blocking
+from utils.metrics import OMI_LIVE_STT_MISALIGNED_FRAMES_TOTAL
 from utils.http_client import get_stt_client, get_stt_semaphore
 from utils.stt.safe_socket import SafeDeepgramSocket  # noqa: F401 — re-exported for backward compat
 from utils.stt.socket import STTSocket
@@ -309,9 +311,10 @@ def get_stt_service_for_language(
 ) -> Tuple[Optional[STTService], Optional[str], Optional[str]]:
     """Select a serving STT provider allowed for the requested product surface.
 
-    A ``dg-*`` configuration is eligible only for the retained self-hosted
-    deployment. It never selects Deepgram's hosted API, and a missing
-    self-hosted endpoint falls through to the policy-owned alternatives.
+    A ``dg-*`` configuration serves from whichever Deepgram deployment the
+    runtime is configured for — self-hosted when its endpoint is set, otherwise
+    the hosted API. Without credentials it falls through to the policy-owned
+    alternatives rather than failing the session.
     """
     # Missing language metadata historically meant English. Preserve that
     # behavior without opening a retired-provider fallback for unknown values.
@@ -331,8 +334,8 @@ def get_stt_service_for_language(
             model = model.strip()
             if (
                 model.startswith('dg-')
-                and provider_is_enabled(DEEPGRAM_SELF_HOSTED_PROVIDER, surface)
-                and is_dg_self_hosted
+                and provider_is_enabled(deepgram_provider_for_runtime(is_dg_self_hosted), surface)
+                and _deepgram_is_available()
             ):
                 dg_model = model.replace('dg-', '', 1)
                 if multi_lang_enabled and language in deepgram_nova3_multi_languages:
@@ -412,22 +415,26 @@ def should_preserve_filler_words(language: str) -> bool:
     return not language.startswith('en')
 
 
-# Initialize a Deepgram client only for the retained self-hosted deployment.
-# Never construct the SDK's default client here: its default endpoint is the
-# retired hosted Deepgram API.
+# The endpoint is always set explicitly, never the SDK default.
+DEEPGRAM_CLOUD_ENDPOINT: Final = 'https://api.deepgram.com'
+
 is_dg_self_hosted = os.getenv('DEEPGRAM_SELF_HOSTED_ENABLED', '').lower() == 'true'
 deepgram: Optional[DeepgramClient] = None
 
 
-def _self_hosted_deepgram_options(endpoint: str) -> DeepgramClientOptions:
-    """Build options for a verified self-hosted endpoint, never the SDK default."""
+def _deepgram_options(endpoint: str) -> DeepgramClientOptions:
+    """Build options pinned to an explicit endpoint, never the SDK default."""
     options = DeepgramClientOptions(options={"termination_exception_connect": "true"})
     options.url = endpoint
     return options
 
 
 def _require_self_hosted_deepgram_endpoint(endpoint: str) -> str:
-    """Reject the retired hosted endpoint before constructing an SDK client."""
+    """Reject the hosted endpoint where a self-hosted one was promised.
+
+    Falling back to the hosted API would bill the wrong account and hide a
+    broken self-hosted deployment behind working transcription.
+    """
     if not endpoint:
         raise ValueError("DEEPGRAM_SELF_HOSTED_URL must be set when DEEPGRAM_SELF_HOSTED_ENABLED is true")
     if urllib.parse.urlparse(endpoint).hostname == 'api.deepgram.com':
@@ -435,11 +442,50 @@ def _require_self_hosted_deepgram_endpoint(endpoint: str) -> str:
     return endpoint
 
 
-if is_dg_self_hosted:
-    dg_self_hosted_url = _require_self_hosted_deepgram_endpoint(os.getenv('DEEPGRAM_SELF_HOSTED_URL') or '')
-    deepgram_options = _self_hosted_deepgram_options(dg_self_hosted_url)
-    logger.info(f"Using Deepgram self-hosted at: {dg_self_hosted_url}")
-    deepgram = DeepgramClient(os.getenv('DEEPGRAM_API_KEY') or '', deepgram_options)
+# Built once; also keys the per-request BYOK client below.
+deepgram_cloud_options = _deepgram_options(DEEPGRAM_CLOUD_ENDPOINT)
+
+_managed_deepgram_lock = threading.RLock()
+_managed_deepgram_ready = False
+
+
+def _build_managed_deepgram_client() -> Optional[DeepgramClient]:
+    """Build the account-owned client, or None when no credential is configured."""
+    if is_dg_self_hosted:
+        endpoint = _require_self_hosted_deepgram_endpoint(os.getenv('DEEPGRAM_SELF_HOSTED_URL') or '')
+        logger.info(f'Using Deepgram self-hosted at: {endpoint}')
+        return DeepgramClient(os.getenv('DEEPGRAM_API_KEY') or '', _deepgram_options(endpoint))
+    api_key = os.getenv('DEEPGRAM_API_KEY')
+    if not api_key:
+        return None
+    logger.info('Using Deepgram hosted API')
+    return DeepgramClient(api_key, deepgram_cloud_options)
+
+
+def _managed_deepgram_client() -> Optional[DeepgramClient]:
+    """Return the account client, constructing it on first use.
+
+    Deferred so importing this module never depends on Deepgram configuration:
+    schema export, test collection and other non-serving entry points import it
+    without credentials. Mirrors the lazy client in ``utils/stt/pre_recorded.py``.
+    """
+    global deepgram, _managed_deepgram_ready
+    if _managed_deepgram_ready:
+        return deepgram
+    with _managed_deepgram_lock:
+        if not _managed_deepgram_ready:
+            deepgram = _build_managed_deepgram_client()
+            _managed_deepgram_ready = True
+    return deepgram
+
+
+def _deepgram_is_available() -> bool:
+    """Return whether this request could reach Deepgram at all.
+
+    A BYOK user brings their own credential, so Deepgram stays selectable on a
+    runtime that has no account key of its own.
+    """
+    return _managed_deepgram_client() is not None or bool(get_byok_key('deepgram'))
 
 
 async def process_audio_dg(
@@ -576,10 +622,22 @@ def _dg_keywords_set(options: LiveOptions, keywords: List[str]):
 
 
 def _deepgram_client_for_request() -> DeepgramClient:
-    """Return the explicitly configured self-hosted Deepgram client only."""
-    if not is_dg_self_hosted or deepgram is None:
-        raise RuntimeError('Hosted Deepgram is disabled; self-hosted Deepgram is not configured')
-    return deepgram
+    """Return the Deepgram client for the current request.
+
+    BYOK users pay Deepgram directly, so their key serves their requests.
+    Self-hosted has no per-user billing and ignores BYOK.
+    """
+    managed = _managed_deepgram_client()
+    if is_dg_self_hosted:
+        if managed is None:
+            raise RuntimeError('Self-hosted Deepgram is not configured')
+        return managed
+    byok = get_byok_key('deepgram')
+    if byok:
+        return DeepgramClient(byok, deepgram_cloud_options)
+    if managed is None:
+        raise RuntimeError('Deepgram is not configured; set DEEPGRAM_API_KEY or provide a BYOK key')
+    return managed
 
 
 def connect_to_deepgram(
@@ -693,6 +751,11 @@ class SafeModulateSocket(STTSocket):
         self._prev_partial_text: str = ''
         self._prev_partial_start_ms: int = 0
         self._prev_partial_word_count: int = 0
+        # Velma rejects any s16le frame that is not a whole number of samples with
+        # {"type":"error","error":"Invalid input audio"} and then closes the socket, so a
+        # single odd-length frame ends the session even after valid audio. Nothing upstream
+        # guarantees even-length buffers, so carry a trailing odd byte to the next frame.
+        self._pending_odd_byte: bytes = b''
         self._recv_task: asyncio.Task[None] = asyncio.ensure_future(self._recv_loop(), loop=loop)
         self._send_task: asyncio.Task[None] = asyncio.ensure_future(self._send_loop(), loop=loop)
 
@@ -731,8 +794,22 @@ class SafeModulateSocket(STTSocket):
                 # later frame would be queued and never sent. The Parakeet sockets guard the same
                 # way. The header stays pending because _header_sent is only set once it is queued.
                 return True
+            aligned = self._pending_odd_byte + data
+            self._pending_odd_byte = aligned[-1:] if len(aligned) % 2 else b''
+            if self._pending_odd_byte:
+                aligned = aligned[:-1]
+                misaligned = True
+            else:
+                misaligned = False
+            if misaligned:
+                OMI_LIVE_STT_MISALIGNED_FRAMES_TOTAL.labels(
+                    provider=STTService.modulate.value, stage='provider_send'
+                ).inc()
+            if not aligned:
+                # One carried byte and nothing else yet: it is buffered, not dropped.
+                return True
             prepend_header = not self._header_sent and self._wav_header is not None
-            queued_data = (self._wav_header or b'') + data if prepend_header else data
+            queued_data = (self._wav_header or b'') + aligned if prepend_header else aligned
 
         try:
             current_loop = asyncio.get_running_loop()
@@ -851,6 +928,14 @@ class SafeModulateSocket(STTSocket):
                 elif msg_type == 'utterance':
                     utt = msg.get('utterance', msg)
                     self._handle_utterance(utt)
+            # A clean async-for exhaustion means the provider closed the upstream
+            # WebSocket without raising. A local drain (self._closed) or an
+            # explicit provider 'done' (self._done_event) is expected
+            # finalization; any other clean close is unexpected provider death and
+            # must latch terminal so the listen loop propagates it without waiting
+            # for another client audio frame (#10028).
+            if not self._closed and not self._done_event.is_set():
+                self._mark_dead('modulate ws closed cleanly without terminal frame')
         except websockets.exceptions.ConnectionClosed as e:
             self._mark_dead(f'ws recv closed: {e}')
         except Exception as e:
@@ -1376,6 +1461,13 @@ class ParakeetWebSocketSocket(STTSocket):
                                 self._stream_transcript([seg])
                     except json.JSONDecodeError:
                         pass
+            # A clean async-for exhaustion means the provider closed the upstream
+            # WebSocket without raising. Unless this is a local drain/finalization
+            # (self._closed, set by drain_and_close and the _run finally), it is an
+            # unexpected clean provider close and must latch terminal so the listen
+            # loop propagates it without waiting for another client audio frame (#10028).
+            if not self._closed:
+                self._mark_dead('parakeet ws closed cleanly by provider')
         except Exception as e:
             if not self._closed:
                 logger.error(f"Parakeet WS recv error: {e}")

@@ -26,10 +26,14 @@ SOURCE_SHA = "a" * 40
 
 
 def available_metrics() -> dict[str, dict[str, object]]:
-    return {
+    metrics = {
         name: {"denominator": 100, "time_window": "PT24H", "minimum_sample": 30, "value": 0.99}
         for name in doctor.METRIC_CONTRACTS
     }
+    metrics["proactive_delivery"].update(
+        {"health_status": "healthy", "numerator": 27, "alarm_reason": None}
+    )
+    return metrics
 
 
 def healthy_snapshot(*, phase: str = "beta") -> dict[str, object]:
@@ -54,8 +58,8 @@ def healthy_snapshot(*, phase: str = "beta") -> dict[str, object]:
         },
         "manifest": {
             "release_id": RELEASE_ID,
-            "source_sha": SOURCE_SHA,
-            "qualification": {"evidence_asset": "qualification-evidence-0.12.72+12072.json"},
+            "app_source_sha": SOURCE_SHA,
+            "qualification_evidence_asset": "qualification-evidence-0.12.72+12072.json",
         },
         "pointers": {"beta": pointer, "stable": pointer if phase == "stable" else {"release_id": "v0.12.71+12071-macos"}},
         "legacy_release": {"channel": current_channel, "is_live": True},
@@ -64,7 +68,14 @@ def healthy_snapshot(*, phase: str = "beta") -> dict[str, object]:
             "rust": {"channels": {current_channel: RELEASE_ID}},
         },
         "static": {"beta": static if phase == "beta" else {"channel": "beta", "release_id": "v0.12.71+12071-macos"}, "stable": static if phase == "stable" else {"channel": "stable", "release_id": "v0.12.71+12071-macos"}},
-        "backend": {"release_tag": RELEASE_ID, "release_sha": SOURCE_SHA, "release_channel": "stable", "revision": "desktop-backend-1"},
+        "backend": {
+            "status": "healthy",
+            "service": "omi-desktop-backend",
+            "backend_release_sha": "b" * 40,
+            "backend_release_channel": "production",
+            "chat_contract_version": "1",
+            "revision": "desktop-backend-1",
+        },
         "tracking": {"desktop_backend_prod_deployed_sha": SOURCE_SHA},
         "codemagic": {"artifact_status": "passed", "post_artifact_failure": ""},
         "metrics": available_metrics(),
@@ -110,6 +121,39 @@ class DesktopReleaseDoctorTests(unittest.TestCase):
         self.assertEqual({item["status"] for item in report["metrics"]}, {"unavailable"})
         self.assertTrue(all(item["denominator"] is None for item in report["metrics"]))
 
+    def test_unhealthy_proactive_delivery_fails_operational_surface(self) -> None:
+        snapshot = healthy_snapshot()
+        snapshot["metrics"]["proactive_delivery"] = {
+            "health_status": "unhealthy",
+            "denominator": 882,
+            "numerator": 0,
+            "time_window": "PT24H",
+            "minimum_sample": 50,
+            "value": 0,
+            "alarm_reason": "advice_users_exactly_zero",
+        }
+
+        report = doctor.evaluate_snapshot(snapshot)
+        metrics = surface(report, "operational_metrics")
+        proactive = next(item for item in report["metrics"] if item["id"] == "proactive_delivery")
+        self.assertEqual(report["overall"], "FAIL")
+        self.assertEqual(metrics["status"], "FAIL")
+        self.assertEqual(metrics["classification"], "customer_visible_split")
+        self.assertEqual(proactive["health_status"], "unhealthy")
+        self.assertEqual(proactive["numerator"], 0)
+        self.assertEqual(proactive["alarm_reason"], "advice_users_exactly_zero")
+
+    def test_missing_proactive_health_status_is_not_rendered_as_pass(self) -> None:
+        snapshot = healthy_snapshot()
+        del snapshot["metrics"]["proactive_delivery"]["health_status"]
+
+        report = doctor.evaluate_snapshot(snapshot)
+        metrics = surface(report, "operational_metrics")
+        proactive = next(item for item in report["metrics"] if item["id"] == "proactive_delivery")
+        self.assertEqual(report["overall"], "WARN")
+        self.assertEqual(metrics["status"], "WARN")
+        self.assertEqual(proactive["status"], "unavailable")
+
     def test_unavailable_surfaces_are_warns_not_silent_success(self) -> None:
         snapshot = healthy_snapshot()
         snapshot["appcasts"]["python"] = doctor._unavailable("network unavailable")
@@ -140,7 +184,7 @@ class DesktopReleaseDoctorTests(unittest.TestCase):
         document = {
             "fields": {
                 "release_id": {"stringValue": RELEASE_ID},
-                "source_sha": {"stringValue": SOURCE_SHA},
+                "app_source_sha": {"stringValue": SOURCE_SHA},
                 "changelog": {"arrayValue": {"values": [{"stringValue": "private prose"}]}},
                 "download_url": {"stringValue": "https://example.invalid/private"},
             }
@@ -151,9 +195,9 @@ class DesktopReleaseDoctorTests(unittest.TestCase):
                 "desktop_release_manifests",
                 RELEASE_ID,
                 "access-token",
-                allowed_fields=("release_id", "source_sha"),
+                allowed_fields=("release_id", "app_source_sha"),
             )
-        self.assertEqual(projection, {"release_id": RELEASE_ID, "source_sha": SOURCE_SHA})
+        self.assertEqual(projection, {"release_id": RELEASE_ID, "app_source_sha": SOURCE_SHA})
 
     def test_release_projection_keeps_control_metadata_but_drops_prose(self) -> None:
         summary = doctor._project_release_summary(

@@ -966,16 +966,6 @@
             }
         }
     },
-    "renewsOn": "Ваш план аднаўляецца на {date}.",
-    "@renewsOn": {
-        "description": "Renewal message",
-        "placeholders": {
-            "date": {
-                "type": "String",
-                "example": "Jan 1, 2026"
-            }
-        }
-    },
     "basicPlan": "Бясплатны план",
     "@basicPlan": {
         "description": "Basic plan name"
@@ -1698,22 +1688,6 @@
     "lovingOmi": "Нравіцца вам Omi?",
     "@lovingOmi": {
         "description": "Title for the app review prompt"
-    },
-    "leaveReviewIos": "Дапамажыце нам дасягнуць больш людзей, пакідаючы водгук ў App Store. Ваш водгук значыць шмат для нас!",
-    "@leaveReviewIos": {
-        "description": "App review prompt text for iOS users"
-    },
-    "leaveReviewAndroid": "Дапамажыце нам дасягнуць больш людзей, пакідаючы водгук ў Google Play Store. Ваш водгук значыць шмат для нас!",
-    "@leaveReviewAndroid": {
-        "description": "App review prompt text for Android users"
-    },
-    "rateOnAppStore": "Агранізавіць ў App Store",
-    "@rateOnAppStore": {
-        "description": "Button text to rate on Apple App Store"
-    },
-    "rateOnGooglePlay": "Агранізавіць ў Google Play",
-    "@rateOnGooglePlay": {
-        "description": "Button text to rate on Google Play Store"
     },
     "maybeLater": "Магчыма пазней",
     "@maybeLater": {
@@ -5506,7 +5480,7 @@
     "@noSpecificDataAccessConfigured": {
         "description": "Message shown when app has no specific data access"
     },
-    "basicPlanDescription": "1 200 прэміум мін + неабмежавана на прыладзе",
+    "basicPlanDescription": "300 прэміум мін + неабмежавана на прыладзе",
     "@basicPlanDescription": {
         "description": "Description of basic plan features in usage page"
     },
@@ -10583,6 +10557,7 @@
     "syncStatusWaiting": "Чакае сінхранізацыі",
     "syncStatusRetrying": "Не атрымалася апрацаваць — паўтор",
     "syncStatusFailed": "Памылка — націсніце «Паўтарыць»",
+    "syncStatusTooOld": "Занадта старое для сінхранізацыі — Omi не можа яго прыняць",
     "syncStatusFileUnavailable": "Файл недаступны",
     "syncStatusUploaded": "Запампавана · апрацоўка ў Omi",
     "noRecordingsYet": "Запісаў пакуль няма",
@@ -10733,5 +10708,77 @@
     "rayBanMetaMicPickerDescription": "Выберыце Bluetooth-мікрафон акуляраў. Музыка прыпыніцца, пакуль Omi яго выкарыстоўвае.",
     "rayBanMetaMicPickerEmpty": "Bluetooth-мікрафоны не знойдзены. Падключыце акуляры ў наладах iPhone і паўтарыце спробу.",
     "rayBanMetaMicPickerLoadError": "Не ўдалося загрузіць Bluetooth-мікрафоны. Праверце, ці ўключаны Bluetooth, і паўтарыце спробу.",
-    "rayBanMetaMicPickerConnectError": "Не ўдалося падключыцца да гэтага мікрафона. Праверце, ці падключаны ён у наладах iPhone."
+    "rayBanMetaMicPickerConnectError": "Не ўдалося падключыцца да гэтага мікрафона. Праверце, ці падключаны ён у наладах iPhone.",
+    "cloudTranscription": "Воблачная транскрыпцыя",
+    "copyMessage": "Капіяваць паведамленне",
+    "deleteOnDeviceModel": "Выдаліць мадэль",
+    "deleteOnDeviceModelConfirm": "Вы сапраўды хочаце выдаліць гэту мадэль?",
+    "downgradeAnyway": "Усё роўна перайсці",
+    "downgradeLimitBattery": "У 7 разоў большы расход батарэі",
+    "downgradeLimitDelay": "Затрымка 5–7 секунд",
+    "downgradeLimitQuality": "На 30% горшая якасць транскрыпцыі",
+    "downgradeLimitSpeakers": "Немагчыма распазнаць дыктараў",
+    "downgradeLimitationsHeading": "Вы сутыкнецеся з такімі абмежаваннямі:",
+    "downgradeToFreemiumTitle": "Перайсці на бясплатны план?",
+    "errorLoadingAudio": "Памылка загрузкі аўдыя",
+    "failedToLinkCalendarEvent": "Не ўдалося звязаць падзею календара",
+    "googleCalendarConnectPrompt": "Падключыце Google Calendar, каб звязваць размовы з падзеямі календара.",
+    "googleCalendarNotConnected": "Google Calendar не падключаны",
+    "linkedToEvent": "Звязана з «{title}»",
+    "onDeviceModelDeleted": "Мадэль выдалена",
+    "onDeviceModelDownloadFailed": "Не ўдалося загрузіць мадэль",
+    "onDeviceModelDownloadFailedDesc": "Не ўдалося загрузіць мадэль Whisper. Паспрабуйце яшчэ раз.",
+    "onDeviceModelDownloadSuccess": "Мадэль загружана",
+    "onDeviceModelDownloadSuccessDesc": "Мадэль Whisper паспяхова загружана",
+    "onDeviceModelDownloaded": "Загружана",
+    "onDeviceModelSize": "Памер мадэлі",
+    "onDeviceTranscription": "Транскрыпцыя на прыладзе",
+    "onDeviceTranscriptionDesc": "Транскрыпцыя апрацоўваецца лакальна на вашай прыладзе",
+    "searchSettings": "Пошук у параметрах…",
+    "speechToTextProvider": "Пастаўшчык распазнавання маўлення",
+    "speechToTextProviderDesc": "Выберыце сэрвіс для транскрыпцыі",
+    "sttFilterAuto": "Аўта",
+    "sttModelAccuracy": "Дакладнасць",
+    "sttModelFaster": "Хутчэй",
+    "sttModelHigher": "Вышэй",
+    "sttModelLower": "Ніжэй",
+    "sttModelSlower": "Павольней",
+    "sttModelSpeed": "Хуткасць",
+    "sttNone": "Няма",
+    "sttProviderDeepgram": "Deepgram",
+    "sttProviderSoniox": "Soniox",
+    "sttProviderSpeechmatics": "Speechmatics",
+    "thanksForYourFeedback": "Дзякуй за ваш водгук!",
+    "transcriptionLanguage": "Мова транскрыпцыі",
+    "transcriptionLanguageDesc": "Выберыце мову для транскрыпцыі маўлення",
+    "whisperModel": "Мадэль Whisper",
+    "whisperModelDesc": "Выберыце мадэль для транскрыпцыі на прыладзе",
+    "whisperModelSizeBase": "Базавая",
+    "whisperModelSizeLarge": "Вялікая",
+    "whisperModelSizeMedium": "Сярэдняя",
+    "whisperModelSizeSmall": "Малая",
+    "whisperModelSizeTiny": "Мініяцюрная",
+    "planSheetChooseYourPlan": "Выберыце свой план, каб адкрыць безмежны Omi.",
+    "availableOnMacMobileWeb": "Даступна на Mac, мабільным і ў вэбе",
+    "popularBadge": "ПАПУЛЯРНЫ",
+    "worksOnDesktop": "Працуе на камп'ютары",
+    "noDesktopAccess": "Не працуе на камп'ютары",
+    "annualBillingSummary": "{months} мес. / {price}",
+    "monthsFreeBadge": "{count, plural, one{{count} месяц бясплатна} few{{count} месяцы бясплатна} many{{count} месяцаў бясплатна} other{{count} месяца бясплатна}}",
+    "freemiumLimitsIntro": "Omi бясплатны, але бясплатная версія мае абмежаванні, якія ўплываюць на ваш вопыт:",
+    "downgradeLimitDelayNotRealTime": "Затрымка 5-7 секунд (не ў рэальным часе)",
+    "downgradeToFreemiumAction": "Перайсці на бясплатны план",
+    "getFreeUnlimitedAccess": "Атрымайце бязмежны доступ бясплатна",
+    "shareDataForTraining": "Дзяліцца дадзенымі для навучання",
+    "yourRequestUnderReview": "Ваш запыт разглядаецца",
+    "pinAsBaseline": "Замацаваць як базавае",
+    "unpinAsBaseline": "Адмацаваць ад базавага",
+    "baselineMemory": "Базавая памяць",
+    "alwaysInContext": "Заўсёды ў кантэксце",
+    "accountCutoverUpdateRequiredTitle": "Требуется обновление",
+    "accountCutoverUpdateRequiredMessage": "Установите последнее приложение Omi, чтобы продолжить после миграции аккаунта.",
+    "accountCutoverMigrationInProgressTitle": "Идёт миграция",
+    "accountCutoverMigrationInProgressMessage": "Ваш аккаунт мигрирует. Функции продукта приостановлены до завершения миграции.",
+    "accountCutoverMigrationRollbackMessage": "Ваш аккаунт на обслуживании после отката миграции. Часть более новых данных может быть изолирована.",
+    "accountCutoverOpenStore": "Открыть магазин"
 }

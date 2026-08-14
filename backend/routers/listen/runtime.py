@@ -26,7 +26,7 @@ from utils.apps import is_audio_bytes_app_enabled
 from utils.async_tasks import WebSocketTaskSupervisor, drain_tasks, wait_for_event
 from utils.byok import extract_byok_from_websocket, get_byok_keys, set_byok_keys
 from utils.client_device import resolve_client_device_from_headers
-from utils.executors import db_executor, run_blocking, start_background_task
+from utils.executors import db_executor, run_blocking, start_background_task, storage_executor
 from utils.fair_use import (
     FAIR_USE_CHECK_INTERVAL_SECONDS,
     FAIR_USE_ENABLED,
@@ -45,7 +45,7 @@ from utils.listen_session_bootstrap import finalize_listen_connect_context, load
 from utils.metrics import BACKEND_LISTEN_ACTIVE_WS_CONNECTIONS
 from utils.notifications import send_credit_limit_notification, send_silent_user_notification
 from utils.onboarding import OnboardingHandler
-from utils.observability.journeys import JourneyAttempt, JourneyOutcome
+from utils.observability.transcription import LiveSTTAttempt
 from utils.pusher import PusherCircuitBreakerOpen
 from utils.stt.streaming import get_stt_service_for_language
 from utils.subscription import get_remaining_transcription_seconds, is_trial_paywalled
@@ -60,6 +60,7 @@ from utils.transcribe_decisions import (
     validate_audio_format,
 )
 from utils.transcribe_store import check_credits_invalidation, conversations_db, redis_db, user_db
+from database.account_deletion_policy import account_deletion_blocks_access
 from utils.webhooks import get_audio_bytes_webhook_seconds
 from utils.audio import AudioRingBuffer
 from utils.other.storage import get_user_has_speech_profile
@@ -68,6 +69,7 @@ from utils.transcribe_decisions import USER_SELF_PERSON_ID, person_id_for_client
 from .contracts import ListenLimits, ListenRequest, ListenSessionState
 from .conversations import LiveConversationController
 from .persistence import ListenPersistence
+from .parity_capture import ListenParityCapture
 from .receiver import ListenReceiver
 from .speakers import SpeakerMatcher
 from .transcripts import TranscriptProcessor
@@ -77,6 +79,11 @@ logger = logging.getLogger(__name__)
 
 PUSHER_ENABLED = bool(os.getenv('HOSTED_PUSHER_API_URL'))
 FREEMIUM_THRESHOLD_SECONDS = 180
+
+
+def _account_deletion_blocks_owner_persistence(uid: str) -> bool:
+    status = user_db.get_user_deletion_wipe_status(uid)
+    return account_deletion_blocks_access(status)
 
 
 def _normalize_client_conversation_id(value: Optional[str]) -> Optional[str]:
@@ -116,7 +123,6 @@ class ListenSessionRuntime:
         self.private_cloud_sync_enabled = False
         self.has_speech_profile = False
         self.conversation_creation_timeout = request.conversation_timeout
-        self.frame_size = 160
         self.lc3_frame_duration_us: Optional[int] = None
         self.task_supervisor = WebSocketTaskSupervisor(
             uid=request.uid, label='listen', gauge=BACKEND_LISTEN_ACTIVE_WS_CONNECTIONS
@@ -134,6 +140,7 @@ class ListenSessionRuntime:
         self.speakers: Any = None
         self.transcripts: Any = None
         self.conversations: Any = None
+        self.parity_capture = ListenParityCapture(None)
 
     def _build_components(self) -> None:
         channels = build_channel_config(self.request.source or 'phone_call') if self.is_multi_channel else []
@@ -161,6 +168,11 @@ class ListenSessionRuntime:
             return True
         except WebSocketDisconnect:
             self.state.active = False
+        except RuntimeError as error:
+            # The ASGI server refuses a send after close: the socket is gone, so stop
+            # queueing events for it instead of failing once per remaining event.
+            self.state.active = False
+            logger.warning('Listen event delivery after close type=%s', type(error).__name__)
         except Exception as error:
             logger.error('Listen event delivery failed type=%s', type(error).__name__)
         return False
@@ -185,25 +197,48 @@ class ListenSessionRuntime:
 
     def start_live_transcription(self) -> None:
         """Accept the journey once the listen socket has received real audio."""
+        if self.use_custom_stt:
+            return
         if self.state.live_transcription_attempt is None:
-            self.state.live_transcription_attempt = JourneyAttempt('live_transcription')
+            self.state.live_transcription_attempt = LiveSTTAttempt(
+                provider=getattr(self.stt_service, 'value', self.stt_service),
+                platform=self.client_device_context.platform,
+            )
+
+    def capture_client_audio(self, audio: bytes) -> None:
+        try:
+            self.parity_capture.observe_client_audio(audio)
+        except Exception as error:
+            logger.warning('Listen parity capture client event failed type=%s', type(error).__name__)
+
+    def capture_outbound_stt(self, audio: bytes) -> None:
+        try:
+            self.parity_capture.observe_outbound_stt(audio)
+        except Exception as error:
+            logger.warning('Listen parity capture outbound event failed type=%s', type(error).__name__)
+
+    def capture_inbound_stt(self, segments: List[Dict[str, Any]]) -> None:
+        try:
+            self.parity_capture.observe_inbound_stt(segments)
+        except Exception as error:
+            logger.warning('Listen parity capture inbound event failed type=%s', type(error).__name__)
 
     def complete_live_transcription(self) -> None:
         """Record the first nonempty transcript successfully delivered to the client."""
         if self.state.live_transcription_attempt is not None:
-            self.state.live_transcription_attempt.finish('success')
+            self.state.live_transcription_attempt.finish('success', phase='transcript_delivery')
 
     def _finish_live_transcription(self) -> None:
         """Terminalize an accepted attempt that never delivered a transcript."""
         attempt = self.state.live_transcription_attempt
         if attempt is None:
             return
-        outcome: JourneyOutcome = (
+        outcome = (
             'failure'
             if self.state.live_transcription_failed or self.state.stt_terminal_failure or self.state.close_code == 1011
             else 'cancelled'
         )
-        attempt.finish(outcome)
+        attempt.finish(outcome, phase='teardown')
 
     async def _admit(self) -> bool:
         if not self.request.uid:
@@ -239,6 +274,20 @@ class ListenSessionRuntime:
             self.language,
             multi_lang_enabled=not single_language_mode,
             preferred_service=request.stt_service,
+        )
+        self.parity_capture = ListenParityCapture.from_environ(
+            principal_id=request.uid,
+            session_id=getattr(self, 'session_id', ''),
+            provider=getattr(self.stt_service, 'value', self.stt_service),
+            model=self.stt_model or '',
+            request={
+                'codec': request.codec,
+                'sample_rate': request.sample_rate,
+                'channels': request.channels,
+                'language': self.stt_language,
+                'provider': getattr(self.stt_service, 'value', self.stt_service),
+                'model': self.stt_model,
+            },
         )
         if not self.stt_service or not self.stt_language:
             await request.websocket.close(code=1008, reason=f'The language is not supported, {self.language}')
@@ -278,7 +327,6 @@ class ListenSessionRuntime:
         )
         decision = normalize_codec_frame(request.codec)
         self.request = replace(request, codec=decision.codec)
-        self.frame_size = decision.frame_size
         self.lc3_frame_duration_us = decision.lc3_frame_duration_us
         self._build_components()
         if not self.user_has_credits:
@@ -302,14 +350,33 @@ class ListenSessionRuntime:
                     await request.websocket.send_json(event)
 
             self.onboarding_handler = OnboardingHandler(request.uid, send_onboarding, self.transcripts.enqueue)
+            self.spawn(self.onboarding_handler.send_current_question(), name='onboarding_first_question')
         return True
+
+    async def _send_ping(self) -> bool:
+        """Write one keepalive frame, owning a gone peer the same way `asend_event` does.
+
+        The client can vanish between the `client_state` read and the write, so the
+        keepalive is the writer that most often observes the disconnect first. That is
+        an ordinary end of session, not a background-task crash.
+        """
+        try:
+            await self.request.websocket.send_text('ping')
+            return True
+        except WebSocketDisconnect:
+            self.state.active = False
+        except RuntimeError as error:
+            self.state.active = False
+            logger.warning('Listen heartbeat send after close type=%s', type(error).__name__)
+        return False
 
     async def _heartbeat(self) -> None:
         while self.state.active:
             if self.request.websocket.client_state != WebSocketState.CONNECTED:
                 self.state.active = False
                 break
-            await self.request.websocket.send_text('ping')
+            if not await self._send_ping():
+                break
             if self.state.last_activity_time and time.time() - self.state.last_activity_time > 90:
                 self.state.close_code = 1001
                 self.state.active = False
@@ -419,7 +486,16 @@ class ListenSessionRuntime:
         if self.state.fair_use_track_dg_usage and self.state.dg_usage_ms_pending:
             await self.persistence.call(record_dg_usage_ms, self.request.uid, self.state.dg_usage_ms_pending)
             self.state.dg_usage_ms_pending = 0
-        if self.use_custom_stt or not self.state.last_usage_record_timestamp:
+        if self.use_custom_stt:
+            # Exempt from transcription billing and live caps, but the speech
+            # still drives Omi-paid LLM post-processing — meter it in its own
+            # isolated fair-use lane so the spend is visible (#7690).
+            if FAIR_USE_ENABLED and self.receiver.vad_gate is not None:
+                custom_speech_ms = self.receiver.vad_gate.consume_speech_ms_delta()
+                if custom_speech_ms:
+                    await self.persistence.call(record_speech_ms, self.request.uid, custom_speech_ms, 'custom_stt')
+            return 0
+        if not self.state.last_usage_record_timestamp:
             return 0
         speech_seconds = 0
         if self.receiver.vad_gate is not None:
@@ -554,7 +630,7 @@ class ListenSessionRuntime:
                 )
             self.send_event(MessageServiceStatusEvent(status='ready'))
             result = await self.task_supervisor.supervise(receive_task=receive_task)
-            logger.info('Listen supervisor exited reason=%s task=%s', result.reason, result.task_name)
+            logger.info('Listen supervisor exited reason=%s', result.reason)
             if result.reason in {'crash', 'lifetime_done'}:
                 self.state.live_transcription_failed = True
             if receive_task.done() and not receive_task.cancelled():
@@ -577,26 +653,50 @@ class ListenSessionRuntime:
             await self._teardown()
 
     async def _teardown(self) -> None:
+        try:
+            await self._teardown_components()
+        finally:
+            if not self.request.owner_persistence_blocked.is_set():
+                try:
+                    await run_blocking(storage_executor, self.parity_capture.persist)
+                except Exception as error:
+                    logger.warning('Listen parity capture teardown failed type=%s', type(error).__name__)
+
+    async def _teardown_components(self) -> None:
         self.state.shutdown_event.set()
         self.task_supervisor.end_session()
+        owner_persistence_blocked = self.request.owner_persistence_blocked.is_set()
+        if not owner_persistence_blocked:
+            try:
+                owner_persistence_blocked = await self.persistence.call(
+                    _account_deletion_blocks_owner_persistence, self.request.uid
+                )
+            except Exception as error:
+                logger.error('Listen teardown deletion fence unavailable type=%s', type(error).__name__)
+                owner_persistence_blocked = True
+        if owner_persistence_blocked:
+            self.request.owner_persistence_blocked.set()
+            await self.task_supervisor.drain_all(timeout=5.0, cancel=True)
         self._finish_live_transcription()
-        try:
-            await self.transcripts.flush_translations()
-        except Exception as error:
-            logger.error('Translation flush failed type=%s', type(error).__name__)
+        if not owner_persistence_blocked:
+            try:
+                await self.transcripts.flush_translations()
+            except Exception as error:
+                logger.error('Translation flush failed type=%s', type(error).__name__)
         self.state.active = False
         try:
             self.receiver.finish()
         except Exception as error:
             logger.error('STT finish failed type=%s', type(error).__name__)
-        await self._flush_usage(final=True)
+        if not owner_persistence_blocked:
+            await self._flush_usage(final=True)
         if self.request.websocket.client_state == WebSocketState.CONNECTED and not self.state.stt_terminal_failure:
             try:
                 await self.request.websocket.close(code=self.state.close_code)
             except Exception:
                 pass
         conversation_id = self.state.current_conversation_id
-        if conversation_id:
+        if conversation_id and not owner_persistence_blocked:
             try:
                 if self.is_multi_channel:
                     await self.persistence.call(redis_db.remove_in_progress_conversation_id, self.request.uid)
@@ -606,6 +706,17 @@ class ListenSessionRuntime:
                     conversation = await self.persistence.call(
                         conversations_db.get_conversation, self.request.uid, conversation_id
                     )
+                    finalization_reason = getattr(self.state, 'finalization_reason', None)
+                    if conversation and finalization_reason:
+                        external_data = dict(conversation.get('external_data') or {})
+                        external_data['conversation_finalization_reason'] = finalization_reason
+                        await self.persistence.call(
+                            conversations_db.update_conversation,
+                            self.request.uid,
+                            conversation_id,
+                            {'external_data': external_data},
+                        )
+                        conversation['external_data'] = external_data
                     if (
                         conversation
                         and self.state.close_code == 1000
@@ -624,7 +735,8 @@ class ListenSessionRuntime:
             except Exception as error:
                 logger.error('Conversation disconnect finalization failed type=%s', type(error).__name__)
         try:
-            await self.receiver.flush_multi_channel_tail()
+            if not owner_persistence_blocked:
+                await self.receiver.flush_multi_channel_tail()
         finally:
             if self.pusher_close:
                 try:
@@ -633,7 +745,8 @@ class ListenSessionRuntime:
                     logger.error('Pusher close failed type=%s', type(error).__name__)
         if self.onboarding_handler:
             self.onboarding_handler.cleanup()
-        await self.task_supervisor.drain_all(timeout=5.0, cancel=True)
+        if not owner_persistence_blocked:
+            await self.task_supervisor.drain_all(timeout=5.0, cancel=True)
         self.receiver.clear()
         self.transcripts.clear()
         self.speakers.clear()

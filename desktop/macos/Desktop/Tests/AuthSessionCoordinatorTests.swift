@@ -74,10 +74,10 @@ final class AuthSessionCoordinatorTests: XCTestCase {
     XCTAssertTrue(authSource.contains("func invalidateSession(reason:"))
     XCTAssertTrue(authSource.contains("func performLightSessionInvalidation()"))
     XCTAssertTrue(authSource.contains("clearTokens()"))
-    XCTAssertTrue(authSource.contains("commitSignedOutSession(attempt: attempt"))
+    XCTAssertTrue(authSource.contains("commitSignedOutSession("))
 
     // Nuclear signOut still wipes onboarding — invalidate must not.
-    let signOutRange = authSource.range(of: "func signOut() async throws")
+    let signOutRange = authSource.range(of: "func signOut(")
     XCTAssertNotNil(signOutRange)
     let signOutTail = authSource[signOutRange!.lowerBound...]
     let signOutEnd = signOutTail.range(of: "// MARK: - Helper Methods")?.lowerBound ?? signOutTail.endIndex
@@ -135,15 +135,16 @@ final class AuthSessionCoordinatorTests: XCTestCase {
     let authSource = try sourceFile("AuthService.swift")
     let ownerSource = try sourceFile("Chat/RuntimeOwnerIdentity.swift")
 
-    let signOutRange = authSource.range(of: "func signOut() async throws")
+    let signOutRange = authSource.range(of: "func signOut(")
     XCTAssertNotNil(signOutRange)
     let signOutSnippet = String(authSource[signOutRange!.lowerBound...]).prefix(4200)
 
     XCTAssertTrue(signOutSnippet.contains("commitSignedOutSession"))
     XCTAssertFalse(signOutSnippet.contains("RewindDatabase.shared.closeIfStale"))
     XCTAssertTrue(ownerSource.contains("RewindDatabase.shared.retargetEffectiveOwner"))
-    XCTAssertTrue(ownerSource.contains("RewindIndexer.shared.reset()"))
-    XCTAssertTrue(ownerSource.contains("RewindStorage.shared.reset()"))
+    XCTAssertTrue(ownerSource.contains("RewindIndexer.shared.suspendForOwnerTransition()"))
+    XCTAssertTrue(ownerSource.contains("RewindStorage.shared.resetForOwnerTransition()"))
+    XCTAssertTrue(ownerSource.contains("RewindIndexer.shared.resumeAfterOwnerTransition()"))
     XCTAssertTrue(ownerSource.contains("AgentSyncService.shared.stop(flushPendingChanges: false)"))
     XCTAssertTrue(ownerSource.contains("FileIndexerService.shared.invalidateCache()"))
   }

@@ -81,6 +81,10 @@ class MemoryItem extends StatelessWidget {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (memory.isBaseline) ...[
+                      const Icon(Icons.flag, color: Colors.blue, size: 20),
+                      const SizedBox(width: AppStyles.spacingS),
+                    ],
                     if (memory.conversationId != null) ...[
                       _buildConversationLinkButton(context),
                       const SizedBox(width: AppStyles.spacingS),
@@ -187,23 +191,9 @@ class MemoryItem extends StatelessWidget {
           color: Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(AppStyles.radiusMedium),
         ),
-        child: Center(child: FaIcon(FontAwesomeIcons.message, size: 16, color: Colors.white70)),
+        child: const Center(child: FaIcon(FontAwesomeIcons.message, size: 16, color: Colors.white70)),
       ),
     );
-  }
-
-  DateTime _getConversationDate(DateTime createdAt) {
-    return DateTime(createdAt.year, createdAt.month, createdAt.day);
-  }
-
-  void _ensureConversationInGroup(ConversationProvider conversationProvider, dynamic conversation) {
-    final date = _getConversationDate(conversation.createdAt);
-    conversationProvider.groupedConversations.putIfAbsent(date, () => []);
-
-    final conversations = conversationProvider.groupedConversations[date]!;
-    if (!conversations.any((c) => c.id == conversation.id)) {
-      conversations.insert(0, conversation);
-    }
   }
 
   Future<void> _navigateToConversation(BuildContext context) async {
@@ -224,9 +214,10 @@ class MemoryItem extends StatelessWidget {
       final conversationProvider = Provider.of<ConversationProvider>(context, listen: false);
       final detailProvider = Provider.of<ConversationDetailProvider>(context, listen: false);
 
-      _ensureConversationInGroup(conversationProvider, conversation);
-
-      final conversationDate = _getConversationDate(conversation.createdAt);
+      // One derivation for both the group insert and the selected day, in local
+      // time — inserting under the UTC day and selecting another key opened the
+      // detail page on a day nothing was grouped under (#10980).
+      final conversationDate = conversationProvider.ensureConversationInGroup(conversation);
       detailProvider.updateConversation(conversation.id, conversationDate);
 
       Navigator.of(

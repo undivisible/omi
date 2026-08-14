@@ -7,10 +7,14 @@ import re
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / ".github" / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / ".github" / "scripts"))
+
+from workflow_composite_contract import backend_deploy_contract_text
 AUTO_WORKFLOW_PATH = Path(".github/workflows/gcp_backend_auto_dev.yml")
 MANUAL_WORKFLOW_PATH = Path(".github/workflows/gcp_backend.yml")
+DEPLOY_BACKEND_STACK_ACTION = Path(".github/actions/deploy-backend-stack/action.yml")
 ADMISSION_VERIFIER_PATH = Path(".github/scripts/verify_backend_release_admission.py")
 AUTO_ADMISSION_VERIFIER_PATH = Path(".github/scripts/verify_auto_backend_release_admission.py")
 AUTO_PROOF_SHA = "${{ github.event.workflow_run.head_sha }}"
@@ -20,6 +24,7 @@ AUTO_DEPLOY_ADMITTED_SHA = "${{ needs.firestore_readiness.outputs.admitted_sha }
 MANUAL_ADMITTED_SHA = "${{ needs.firestore_readiness.outputs.admitted_sha }}"
 AUTO_SOURCE_ADMISSION_CONDITION = "\n".join(
     (
+        "needs.scope.outputs.applies == 'true' &&",
         "github.event.workflow_run.conclusion == 'success' &&",
         "github.event.workflow_run.event == 'push' &&",
         "github.event.workflow_run.run_attempt == 1 &&",
@@ -39,7 +44,21 @@ MANUAL_TRAFFIC_REPAIR_CONDITION = "\n".join(
         "github.event.inputs.mode == 'repair-traffic-only'",
     )
 )
-MANUAL_DEPLOY_NEEDS = "needs: [validate-production-boundary, firestore_readiness]"
+MANUAL_DEPLOY_JOB_NEEDS = "needs: [validate-production-boundary, firestore_readiness, record_break_glass]"
+MANUAL_DEPLOY_JOB_CONDITION = "\n".join(
+    (
+        "always() &&",
+        "github.ref == 'refs/heads/main' &&",
+        "github.event.inputs.mode == 'deploy' &&",
+        "needs.validate-production-boundary.result == 'success' &&",
+        "needs.firestore_readiness.result == 'success' &&",
+        "(needs.record_break_glass.result == 'success' || needs.record_break_glass.result == 'skipped')",
+    )
+)
+
+
+def deploy_backend_stack_action_text(root: Path = ROOT) -> str:
+    return (root / DEPLOY_BACKEND_STACK_ACTION).read_text(encoding="utf-8")
 
 
 def require_fragment(errors: list[str], text: str, fragment: str, message: str) -> None:
@@ -128,7 +147,7 @@ def folded_job_condition(job: str) -> str | None:
     return "\n".join(line[6:] for line in match.group("condition").splitlines()).strip()
 
 
-def validate_auto_workflow(text: str) -> list[str]:
+def validate_auto_workflow(text: str, root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     on_block = mapping_block(text, "on", 0)
     trigger_keys = (
@@ -151,9 +170,111 @@ def validate_auto_workflow(text: str) -> list[str]:
 
     firestore_job = mapping_block(text, "firestore_readiness", 2)
     readiness_steps = None if firestore_job is None else mapping_block(firestore_job, "steps", 4)
+    scope_job = mapping_block(text, "scope", 2)
+    scope_steps = None if scope_job is None else mapping_block(scope_job, "steps", 4)
+    if scope_job is None:
+        errors.append("auto backend deploy is missing its unprivileged scope decision job")
+    else:
+        require_fragment(
+            errors,
+            scope_job,
+            "permissions:\n      contents: 'read'",
+            "auto backend scope decision must remain contents-read-only",
+        )
+        if "environment:" in scope_job:
+            errors.append("auto backend scope decision must not receive a deployment environment")
+        if "google-github-actions/auth" in scope_job or "gcloud" in scope_job:
+            errors.append("auto backend scope decision must not authenticate to cloud services")
+    if scope_steps is None:
+        errors.append("auto backend deploy scope decision must contain its steps")
+    else:
+        scope_checkout = require_step(
+            errors,
+            scope_steps,
+            "Checkout triggering main commit for scope decision",
+            "triggering-commit scope checkout",
+        )
+        for fragment, message in (
+            (f"ref: {AUTO_PROOF_SHA}", "auto backend scope decision must inspect the triggering SHA"),
+            ("fetch-depth: 2", "auto backend scope decision must shallow-fetch only the triggering parent diff"),
+        ):
+            require_fragment(errors, scope_checkout, fragment, message)
+        if "fetch-depth: 0" in scope_checkout:
+            errors.append("auto backend scope decision must not fetch full history")
+        scope_decision = require_step(
+            errors,
+            scope_steps,
+            "Decide whether the triggering commit can affect the backend deployment",
+            "backend deployment scope decision",
+        )
+        for fragment, message in (
+            (f"GH_TOKEN: ${{{{ github.token }}}}", "auto backend scope decision must use its read-only GitHub token"),
+            (f"RELEASE_SHA: {AUTO_PROOF_SHA}", "auto backend scope decision must bind the triggering SHA"),
+            (
+                '"$api_base/repos/$GITHUB_REPOSITORY/git/ref/heads/main"',
+                "auto backend scope decision must resolve current main through the bounded GitHub ref API",
+            ),
+            (
+                '"$api_base/repos/$GITHUB_REPOSITORY/compare/$RELEASE_SHA...$main_sha"',
+                "auto backend scope decision must compare the immutable triggering SHA to the resolved main SHA through GitHub",
+            ),
+            (
+                'if .ref == "refs/heads/main" and .object.type == "commit"',
+                "auto backend scope decision must bind the current-main ref response identity",
+            ),
+            (
+                '.base_commit.sha == $release_sha and .head_commit.sha == $main_sha',
+                "auto backend scope decision must bind compare base and head identities",
+            ),
+            (
+                '.status == "behind"',
+                "auto backend scope decision must require GitHub's behind status for a superseded no-op",
+            ),
+            (
+                'if [[ "$comparison" == "behind" ]]; then',
+                "auto backend scope decision must only no-op after confirmed supersession",
+            ),
+            (
+                "supersession API proof was unavailable or ambiguous; preserving fail-closed source admission",
+                "auto backend scope decision must treat API or identity ambiguity as guarded admission",
+            ),
+            ("echo \"applies=true\" >> \"$GITHUB_OUTPUT\"", "auto backend scope decision must continue to guarded admission when supersession is uncertain"),
+            ("echo \"applies=false\" >> \"$GITHUB_OUTPUT\"", "auto backend scope decision must publish a no-op result"),
+            (
+                "Backend development deploy superseded no-op",
+                "auto backend scope decision must summarize superseded candidates as green no-ops",
+            ),
+            (
+                "GitHub compare confirmed triggering SHA $RELEASE_SHA is behind current main $main_sha",
+                "auto backend scope decision must name both bound SHAs in a superseded summary",
+            ),
+            ("git rev-parse \"${RELEASE_SHA}^\"", "auto backend scope decision must inspect the triggering parent"),
+            (
+                "git diff --name-only \"$parent_sha\" \"$RELEASE_SHA\"",
+                "auto backend scope decision must diff the triggering SHA against its parent",
+            ),
+            ("Green no-op", "auto backend scope decision must summarize green no-ops"),
+        ):
+            require_fragment(errors, scope_decision, fragment, message)
+        fallback_summary = "supersession API proof was unavailable or ambiguous; preserving fail-closed source admission"
+        if scope_decision.count(fallback_summary) != 2:
+            errors.append("auto backend scope decision must treat API or identity ambiguity as guarded admission")
+        for forbidden, message in (
+            ("git fetch --no-tags", "auto backend scope decision must not fetch local main history for supersession"),
+            ("git merge-base", "auto backend scope decision must not use local merge-base supersession proof"),
+            ("origin/main", "auto backend scope decision must not resolve local origin/main for supersession"),
+        ):
+            if forbidden in scope_decision:
+                errors.append(message)
     if firestore_job is None:
         errors.append("auto backend deploy is missing its source-admission job")
     else:
+        require_fragment(
+            errors,
+            firestore_job,
+            "needs: scope",
+            "auto source-admission job must depend on the scope decision",
+        )
         condition = folded_job_condition(firestore_job)
         if condition != AUTO_SOURCE_ADMISSION_CONDITION:
             errors.append(
@@ -265,24 +386,26 @@ def validate_auto_workflow(text: str) -> list[str]:
     elif re.search(r"(?m)^    if:", deploy_job):
         errors.append("auto backend deploy must not override source-admission dependency")
 
-    if "github.sha" in text:
-        errors.append("auto backend deploy must not use github.sha after workflow_run admission")
-    if text.count(AUTO_PROOF_SHA) != 1:
-        errors.append("auto backend deploy must use workflow_run.head_sha only in the current-main admission guard")
+    if text.count(AUTO_PROOF_SHA) != 3:
+        errors.append("auto backend deploy must use workflow_run.head_sha only in scope decision and current-main admission guard")
     if text.count(AUTO_PROOF_RUN_ATTEMPT) != 1:
         errors.append("auto backend deploy must use workflow_run.run_attempt only in the source-admission guard")
+    contract = backend_deploy_contract_text(text, root, DEPLOY_BACKEND_STACK_ACTION)
+    allowed_github_sha = "ref: ${{ github.sha }}\n        path: .workflow-source"
+    if "github.sha" in contract.replace(allowed_github_sha, ""):
+        errors.append("auto backend deploy must not use github.sha after workflow_run admission")
     if text.count(f"ref: {AUTO_FIRESTORE_ADMITTED_SHA}") != 1:
         errors.append("auto backend deploy must check out the verified SHA before Firestore readiness")
     if text.count(f"FIRESTORE_SOURCE_COMMIT: {AUTO_FIRESTORE_ADMITTED_SHA}") != 2:
         errors.append("auto backend deploy must bind Firestore readiness to the verified SHA")
-    if text.count(f"ref: {AUTO_DEPLOY_ADMITTED_SHA}") != 1:
+    if contract.count('ref: ${{ inputs.admitted_sha }}') != 1:
         errors.append("auto backend deploy must check out the verified SHA before deployment")
-    if text.count(f'--commit-sha "{AUTO_DEPLOY_ADMITTED_SHA}"') != 3:
+    if contract.count('--commit-sha "${{ inputs.admitted_sha }}"') != 3:
         errors.append("auto backend deploy must bind every release vector to the verified SHA")
     return errors
 
 
-def validate_manual_workflow(text: str) -> list[str]:
+def validate_manual_workflow(text: str, root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     on_block = mapping_block(text, "on", 0)
     trigger_keys = (
@@ -303,8 +426,10 @@ def validate_manual_workflow(text: str) -> list[str]:
     )
     if "github.event.inputs.branch" in text or re.search(r"(?m)^      branch:\n", text):
         errors.append("manual backend deploy must not accept an arbitrary branch or ref")
-    if "github.sha" in text:
-        errors.append("manual backend deploy must not substitute the dispatch default SHA for admitted source")
+    contract = backend_deploy_contract_text(text, root, DEPLOY_BACKEND_STACK_ACTION)
+    control_source_ref = "ref: ${{ github.sha }}"
+    if contract.count(control_source_ref) != 1 or "Checkout workflow-owned deploy-control source" not in contract:
+        errors.append("manual backend deploy must stage workflow-owned control scripts from github.sha")
 
     repair_job = mapping_block(text, "repair-traffic", 2)
     if repair_job is None:
@@ -391,35 +516,42 @@ def validate_manual_workflow(text: str) -> list[str]:
     )
 
     deploy_job = mapping_block(text, "deploy", 2)
+    contract = backend_deploy_contract_text(text, root, DEPLOY_BACKEND_STACK_ACTION)
     if deploy_job is None:
         errors.append("manual backend deploy is missing its deployment job")
     else:
         require_fragment(
             errors,
             deploy_job,
-            MANUAL_DEPLOY_NEEDS,
-            "manual deployment must depend on production-boundary validation and source admission",
+            MANUAL_DEPLOY_JOB_NEEDS,
+            "manual deployment must depend on production-boundary validation, source admission, and break-glass audit",
         )
-        if folded_job_condition(deploy_job) != MANUAL_DEPLOY_CONDITION:
-            errors.append("manual deployment must use exactly the main-ref deploy condition")
+        if folded_job_condition(deploy_job) != MANUAL_DEPLOY_JOB_CONDITION:
+            errors.append("manual deployment must gate break-glass deploys on a successful audit record")
         require_fragment(
             errors,
-            deploy_job,
-            f"ref: {MANUAL_ADMITTED_SHA}",
-            "manual deployment must check out the admitted SHA",
+            contract,
+            f"admitted_sha: {MANUAL_ADMITTED_SHA}",
+            "manual deployment must pass the admitted SHA to the deploy composite action",
         )
-        if deploy_job.count(f'--commit-sha "{MANUAL_ADMITTED_SHA}"') != 3:
+        if contract.count('--commit-sha "${{ inputs.admitted_sha }}"') != 3:
             errors.append("manual deployment must bind every release vector to the admitted SHA")
     return errors
 
 
 def validate(root: Path = ROOT) -> list[str]:
-    paths = (AUTO_WORKFLOW_PATH, MANUAL_WORKFLOW_PATH, ADMISSION_VERIFIER_PATH, AUTO_ADMISSION_VERIFIER_PATH)
+    paths = (
+        AUTO_WORKFLOW_PATH,
+        MANUAL_WORKFLOW_PATH,
+        ADMISSION_VERIFIER_PATH,
+        AUTO_ADMISSION_VERIFIER_PATH,
+        DEPLOY_BACKEND_STACK_ACTION,
+    )
     missing = [str(path) for path in paths if not (root / path).is_file()]
     if missing:
         return [f"backend source-admission contract is missing: {path}" for path in missing]
-    errors = validate_auto_workflow((root / AUTO_WORKFLOW_PATH).read_text(encoding="utf-8"))
-    errors.extend(validate_manual_workflow((root / MANUAL_WORKFLOW_PATH).read_text(encoding="utf-8")))
+    errors = validate_auto_workflow((root / AUTO_WORKFLOW_PATH).read_text(encoding="utf-8"), root)
+    errors.extend(validate_manual_workflow((root / MANUAL_WORKFLOW_PATH).read_text(encoding="utf-8"), root))
     return errors
 
 

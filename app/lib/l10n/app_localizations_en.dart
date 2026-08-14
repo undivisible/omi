@@ -744,11 +744,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Your plan renews on $date.';
-  }
-
-  @override
   String get basicPlan => 'Free Plan';
 
   @override
@@ -1788,20 +1783,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lovingOmi => 'Loving Omi?';
 
   @override
-  String get leaveReviewIos =>
-      'Help us reach more people by leaving a review in the App Store. Your feedback means the world to us!';
-
-  @override
-  String get leaveReviewAndroid =>
-      'Help us reach more people by leaving a review in the Google Play Store. Your feedback means the world to us!';
-
-  @override
-  String get rateOnAppStore => 'Rate on App Store';
-
-  @override
-  String get rateOnGooglePlay => 'Rate on Google Play';
-
-  @override
   String get maybeLater => 'Maybe Later';
 
   @override
@@ -2136,6 +2117,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ Edit Memory';
+
+  @override
+  String get pinAsBaseline => 'Pin as Baseline';
+
+  @override
+  String get unpinAsBaseline => 'Unpin from Baseline';
+
+  @override
+  String get baselineMemory => 'Baseline Memory';
+
+  @override
+  String get alwaysInContext => 'Always in context';
 
   @override
   String get memoryContentHint => 'I like to eat ice cream...';
@@ -9767,4 +9760,76 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Could not connect to that microphone. Make sure it is connected in iPhone Settings.';
+
+  @override
+  String get syncStatusTooOld => 'Too old to sync — Omi can\'t accept it';
+
+  @override
+  String get planSheetChooseYourPlan => 'Choose your plan to unlock unlimited Omi.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Available on Mac, mobile, and web';
+
+  @override
+  String get popularBadge => 'POPULAR';
+
+  @override
+  String get worksOnDesktop => 'Works on Desktop';
+
+  @override
+  String get noDesktopAccess => 'Doesn\'t work on Desktop';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months months / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Months Free',
+      one: '1 Month Free',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro => 'Omi is free, but freemium has limits that affect your experience:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5-7 second delay (not real-time)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Downgrade to Freemium';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Get Free Unlimited Access';
+
+  @override
+  String get shareDataForTraining => 'Share data for training';
+
+  @override
+  String get yourRequestUnderReview => 'Your request is under review';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Update Required';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage => 'Install the latest Omi app to continue after account migration.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Migration in Progress';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Your account is migrating. Product features are paused until migration finishes.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Your account is in maintenance after a migration rollback. Some newer data may be stranded.';
+
+  @override
+  String get accountCutoverOpenStore => 'Open store';
 }

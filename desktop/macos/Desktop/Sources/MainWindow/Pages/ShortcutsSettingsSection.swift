@@ -6,6 +6,7 @@ struct ShortcutsSettingsSection: View {
   @Binding var highlightedSettingId: String?
   @State private var recordingTarget: ShortcutTarget?
   @State private var captureError: String?
+  @State private var pendingModifierOnlyShortcut: ShortcutSettings.KeyboardShortcut?
   @State private var localShortcutCaptureMonitor: Any?
 
   init(highlightedSettingId: Binding<String?> = .constant(nil)) {
@@ -25,6 +26,8 @@ struct ShortcutsSettingsSection: View {
       pttSoundsCard
       muteAudioCard
     }
+    .onAppear {
+    }
     .onDisappear {
       stopShortcutCapture()
     }
@@ -35,10 +38,10 @@ struct ShortcutsSettingsSection: View {
       VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
         Text("Open Omi Shortcut")
           .scaledFont(size: OmiType.subheading, weight: .semibold)
-          .foregroundColor(OmiColors.textPrimary)
+          .foregroundColor(Ink.primary)
         Text("Global shortcut to open the Omi app from anywhere.")
           .scaledFont(size: OmiType.body)
-          .foregroundColor(OmiColors.textSecondary)
+          .foregroundColor(Ink.secondary)
       }
 
       HStack(spacing: OmiSpacing.md) {
@@ -70,8 +73,8 @@ struct ShortcutsSettingsSection: View {
     }
     .padding(OmiSpacing.xl)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary.opacity(0.5))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
     )
     .modifier(
       SettingHighlightModifier(
@@ -84,8 +87,7 @@ struct ShortcutsSettingsSection: View {
       && !settings.askOmiUsesCustomShortcut
     return Button {
       stopShortcutCapture()
-      settings.askOmiEnabled = true
-      settings.askOmiShortcut = shortcut
+      settings.updateAskOmiRegistration(enabled: true, shortcut: shortcut)
     } label: {
       shortcutSelectionLabel(tokens: shortcut.displayTokens, isSelected: isSelected)
     }
@@ -97,10 +99,10 @@ struct ShortcutsSettingsSection: View {
       VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
         Text("Push to Talk")
           .scaledFont(size: OmiType.subheading, weight: .semibold)
-          .foregroundColor(OmiColors.textPrimary)
+          .foregroundColor(Ink.primary)
         Text("Hold the key to speak, release to send your question to AI.")
           .scaledFont(size: OmiType.body)
-          .foregroundColor(OmiColors.textSecondary)
+          .foregroundColor(Ink.secondary)
       }
 
       HStack(spacing: OmiSpacing.md) {
@@ -126,14 +128,14 @@ struct ShortcutsSettingsSection: View {
           shortcut: settings.pttShortcut,
           isRecording: recordingTarget == .pushToTalk,
           action: { startShortcutCapture(.pushToTalk) },
-          helperText: "One key or a key combination both work."
+          helperText: "Use a modifier key or a key combination."
         )
       }
     }
     .padding(OmiSpacing.xl)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary.opacity(0.5))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
     )
     .modifier(
       SettingHighlightModifier(
@@ -158,10 +160,10 @@ struct ShortcutsSettingsSection: View {
       VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
         Text("Double-tap for Locked Mode")
           .scaledFont(size: OmiType.subheading, weight: .semibold)
-          .foregroundColor(OmiColors.textPrimary)
+          .foregroundColor(Ink.primary)
         Text("Double-tap the push-to-talk key to keep listening hands-free. Tap again to send.")
           .scaledFont(size: OmiType.body)
-          .foregroundColor(OmiColors.textSecondary)
+          .foregroundColor(Ink.secondary)
       }
       Spacer()
       Toggle("", isOn: $settings.doubleTapForLock)
@@ -169,8 +171,8 @@ struct ShortcutsSettingsSection: View {
     }
     .padding(OmiSpacing.xl)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary.opacity(0.5))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
     )
     .opacity(settings.pttEnabled ? 1 : 0.55)
     .disabled(!settings.pttEnabled)
@@ -184,10 +186,10 @@ struct ShortcutsSettingsSection: View {
       VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
         Text("Push-to-Talk Sounds")
           .scaledFont(size: OmiType.subheading, weight: .semibold)
-          .foregroundColor(OmiColors.textPrimary)
+          .foregroundColor(Ink.primary)
         Text("Play audio feedback when starting and ending voice input.")
           .scaledFont(size: OmiType.body)
-          .foregroundColor(OmiColors.textSecondary)
+          .foregroundColor(Ink.secondary)
       }
       Spacer()
       Toggle("", isOn: $settings.pttSoundsEnabled)
@@ -195,8 +197,8 @@ struct ShortcutsSettingsSection: View {
     }
     .padding(OmiSpacing.xl)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary.opacity(0.5))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
     )
     .opacity(settings.pttEnabled ? 1 : 0.55)
     .disabled(!settings.pttEnabled)
@@ -210,10 +212,10 @@ struct ShortcutsSettingsSection: View {
       VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
         Text("Mute Audio While Talking")
           .scaledFont(size: OmiType.subheading, weight: .semibold)
-          .foregroundColor(OmiColors.textPrimary)
+          .foregroundColor(Ink.primary)
         Text("Silence music and other playback while holding push-to-talk, then restore it on release.")
           .scaledFont(size: OmiType.body)
-          .foregroundColor(OmiColors.textSecondary)
+          .foregroundColor(Ink.secondary)
       }
       Spacer()
       Toggle("", isOn: $settings.pttMuteSystemAudio)
@@ -221,8 +223,8 @@ struct ShortcutsSettingsSection: View {
     }
     .padding(OmiSpacing.xl)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary.opacity(0.5))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
     )
     .opacity(settings.pttEnabled ? 1 : 0.55)
     .disabled(!settings.pttEnabled)
@@ -235,7 +237,7 @@ struct ShortcutsSettingsSection: View {
     VStack(alignment: .leading, spacing: OmiSpacing.md) {
       Text("Keyboard Shortcuts")
         .scaledFont(size: OmiType.subheading, weight: .semibold)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
 
       shortcutRow(
         label: "Open Omi",
@@ -251,8 +253,8 @@ struct ShortcutsSettingsSection: View {
     }
     .padding(OmiSpacing.xl)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary.opacity(0.5))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
     )
   }
 
@@ -260,15 +262,15 @@ struct ShortcutsSettingsSection: View {
     HStack {
       Text(label)
         .scaledFont(size: OmiType.body)
-        .foregroundColor(OmiColors.textSecondary)
+        .foregroundColor(Ink.secondary)
       Spacer()
       Text(keys)
         .scaledMonospacedFont(size: 14, weight: .medium)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
         .padding(.horizontal, OmiSpacing.sm)
         .padding(.vertical, OmiSpacing.xxs)
-        .background(OmiColors.backgroundTertiary.opacity(0.8))
-        .cornerRadius(OmiChrome.badgeRadius)
+        .background(Ink.rowFill)
+        .cornerRadius(SettingsGlassMetrics.pillRadius)
     }
   }
 
@@ -284,21 +286,21 @@ struct ShortcutsSettingsSection: View {
     } label: {
       Text("Custom")
         .scaledFont(size: OmiType.body, weight: .medium)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
         .padding(.horizontal, OmiSpacing.md)
         .padding(.vertical, OmiSpacing.sm)
         .background(
-          RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
+          RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
             .fill(
               (isSelected || recordingTarget == target)
-                ? OmiColors.accent.opacity(0.3)
-                : OmiColors.backgroundTertiary.opacity(0.5))
+                ? Ink.accent.opacity(0.3)
+                : Ink.rowFill)
         )
         .overlay(
-          RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
+          RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
             .stroke(
-              isSelected || recordingTarget == target ? OmiColors.accent : Color.clear,
-              lineWidth: 1.5)
+              isSelected || recordingTarget == target ? Ink.accent : Color.clear,
+              lineWidth: 2)
         )
     }
     .buttonStyle(.plain)
@@ -308,19 +310,19 @@ struct ShortcutsSettingsSection: View {
     Button(action: action) {
       Text("Disable")
         .scaledFont(size: OmiType.body, weight: .medium)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
         .padding(.horizontal, OmiSpacing.md)
         .padding(.vertical, OmiSpacing.sm)
         .background(
-          RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
+          RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
             .fill(
               isDisabled
-                ? OmiColors.accent.opacity(0.3)
-                : OmiColors.backgroundTertiary.opacity(0.5))
+                ? Ink.accent.opacity(0.3)
+                : Ink.rowFill)
         )
         .overlay(
-          RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-            .stroke(isDisabled ? OmiColors.accent : Color.clear, lineWidth: 1.5)
+          RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+            .stroke(isDisabled ? Ink.accent : Color.clear, lineWidth: 2)
         )
     }
     .buttonStyle(.plain)
@@ -333,19 +335,19 @@ struct ShortcutsSettingsSection: View {
           .scaledFont(size: OmiType.body, weight: .medium)
       }
     }
-    .foregroundColor(OmiColors.textPrimary)
+    .foregroundColor(Ink.primary)
     .padding(.horizontal, OmiSpacing.md)
     .padding(.vertical, OmiSpacing.sm)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
         .fill(
           isSelected
-            ? OmiColors.accent.opacity(0.3)
-            : OmiColors.backgroundTertiary.opacity(0.5))
+            ? Ink.accent.opacity(0.3)
+            : Ink.rowFill)
     )
     .overlay(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .stroke(isSelected ? OmiColors.accent : Color.clear, lineWidth: 1.5)
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .stroke(isSelected ? Ink.accent : Color.clear, lineWidth: 2)
     )
   }
 
@@ -359,19 +361,19 @@ struct ShortcutsSettingsSection: View {
     VStack(alignment: .leading, spacing: OmiSpacing.sm) {
       Text(title)
         .scaledFont(size: OmiType.body, weight: .semibold)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
 
       HStack(spacing: OmiSpacing.sm) {
         HStack(spacing: OmiSpacing.xs) {
           ForEach(Array(shortcut.displayTokens.enumerated()), id: \.offset) { _, token in
             Text(token)
               .scaledFont(size: OmiType.body, weight: .semibold)
-              .foregroundColor(OmiColors.textPrimary)
+              .foregroundColor(Ink.primary)
               .padding(.horizontal, token.count > 2 ? 10 : 8)
               .padding(.vertical, OmiSpacing.xs)
               .background(
-                RoundedRectangle(cornerRadius: OmiChrome.elementRadius)
-                  .fill(OmiColors.backgroundPrimary)
+                RoundedRectangle(cornerRadius: SettingsGlassMetrics.controlRadius, style: .continuous)
+                  .fill(Ink.wash)
               )
           }
         }
@@ -386,18 +388,18 @@ struct ShortcutsSettingsSection: View {
 
       Text(helperText)
         .scaledFont(size: OmiType.caption)
-        .foregroundColor(OmiColors.textSecondary)
+        .foregroundColor(Ink.secondary)
 
       if let captureError, isRecording {
         Text(captureError)
           .scaledFont(size: OmiType.caption, weight: .medium)
-          .foregroundColor(.red.opacity(0.9))
+          .foregroundColor(Ink.errorRed)
       }
     }
     .padding(OmiSpacing.md)
     .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundSecondary.opacity(0.85))
+      RoundedRectangle(cornerRadius: SettingsGlassMetrics.cardRadius, style: .continuous)
+        .fill(Ink.wash)
     )
   }
 
@@ -405,6 +407,7 @@ struct ShortcutsSettingsSection: View {
     stopShortcutCapture()
     recordingTarget = target
     captureError = nil
+    pendingModifierOnlyShortcut = nil
 
     localShortcutCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: [
       .flagsChanged, .keyDown,
@@ -420,6 +423,7 @@ struct ShortcutsSettingsSection: View {
     }
     recordingTarget = nil
     captureError = nil
+    pendingModifierOnlyShortcut = nil
   }
 
   private func handleShortcutCapture(_ event: NSEvent) -> Bool {
@@ -437,15 +441,34 @@ struct ShortcutsSettingsSection: View {
       else {
         return false
       }
-      settings.askOmiEnabled = true
-      settings.askOmiShortcut = shortcut
+      settings.updateAskOmiRegistration(enabled: true, shortcut: shortcut)
     case .pushToTalk:
+      if event.type == .flagsChanged {
+        let activeModifiers = ShortcutSettings.KeyboardShortcut.normalizedModifiers(event.modifierFlags)
+        if activeModifiers.isEmpty {
+          guard let shortcut = pendingModifierOnlyShortcut else { return true }
+          settings.pttEnabled = true
+          settings.pttShortcut = shortcut
+          stopShortcutCapture()
+          return true
+        }
+        pendingModifierOnlyShortcut = ShortcutSettings.KeyboardShortcut.fromRecordingEvent(
+          event,
+          allowModifierOnly: true
+        )
+        return true
+      }
       guard
         let shortcut = ShortcutSettings.KeyboardShortcut.fromRecordingEvent(
           event, allowModifierOnly: true)
       else {
         return false
       }
+      guard ShortcutSettings.isSafePushToTalkShortcut(shortcut) else {
+        captureError = "Push-to-talk needs a modifier so regular typing won't start a voice turn."
+        return true
+      }
+      pendingModifierOnlyShortcut = nil
       settings.pttEnabled = true
       settings.pttShortcut = shortcut
     }

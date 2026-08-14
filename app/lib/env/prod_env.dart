@@ -9,20 +9,12 @@ final class ProdEnv implements EnvFields {
   ProdEnv();
 
   @override
-  @EnviedField(varName: 'OPENAI_API_KEY', obfuscate: true)
-  final String? openAIAPIKey = _ProdEnv.openAIAPIKey;
-
-  @override
   @EnviedField(varName: 'POSTHOG_API_KEY', obfuscate: true)
   final String? posthogApiKey = _ProdEnv.posthogApiKey;
 
   @override
   @EnviedField(varName: 'API_BASE_URL', obfuscate: true)
   final String? apiBaseUrl = _ProdEnv.apiBaseUrl;
-
-  @override
-  @EnviedField(varName: 'STAGING_API_URL', obfuscate: true)
-  final String? stagingApiUrl = _ProdEnv.stagingApiUrl;
 
   @override
   @EnviedField(varName: 'GOOGLE_MAPS_API_KEY', obfuscate: true)

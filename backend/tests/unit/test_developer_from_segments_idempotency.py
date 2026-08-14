@@ -2,9 +2,11 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
 
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 import pytest
 
 os.environ.setdefault('OPENAI_API_KEY', 'sk-test-not-real')
@@ -139,6 +141,7 @@ _drop_stale_module('utils.conversations.render', BACKEND_DIR / 'utils' / 'conver
 
 import database.conversations as conversations_db  # noqa: E402
 import routers.developer as developer  # noqa: E402
+import utils.task_intelligence.proactive_engine as proactive_engine  # noqa: E402
 from models.conversation import Conversation, CreateConversation  # noqa: E402
 from models.conversation_enums import ConversationStatus  # noqa: E402
 
@@ -184,8 +187,9 @@ def test_no_client_session_id_preserves_create_conversation_path(monkeypatch):
             finished_at=conversation.finished_at,
             source=conversation.source,
             language=conversation.language,
-            structured={},
+            structured={'title': 'Design review'},
             transcript_segments=conversation.transcript_segments,
+            external_data=None,
             status=ConversationStatus.completed,
         )
 
@@ -194,12 +198,18 @@ def test_no_client_session_id_preserves_create_conversation_path(monkeypatch):
     monkeypatch.setattr(developer.lifecycle_service, 'create_processing_conversation', claim)
     monkeypatch.setattr(developer, 'process_conversation', _process)
 
-    response = developer._create_conversation_from_segments('uid1', _request())
+    arrival = MagicMock()
+    monkeypatch.setattr(proactive_engine, 'persist_capture_arrival_intent', arrival)
+    response = developer._create_conversation_from_segments('uid1', _request(conversation_role='meeting'))
 
     assert response.id == 'random-process-id'
     assert isinstance(captured['conversation'], CreateConversation)
+    assert captured['conversation'].external_data == {'conversation_role': 'meeting'}
     conversations_db.get_conversation.assert_not_called()
     claim.assert_not_called()
+    arrival.assert_called_once_with(
+        'uid1', conversation_id='random-process-id', summary='Design review', is_desktop_meeting=True
+    )
 
 
 def test_client_session_id_uses_stable_conversation_id(monkeypatch):
@@ -255,6 +265,54 @@ def test_client_session_id_persists_when_processor_returns_without_saving(monkey
     assert persisted.call_args.args[1]['id'] == expected_id
 
 
+def test_completed_desktop_meeting_persists_exact_conversation_arrival(monkeypatch):
+    expected_id = developer._from_segments_conversation_id('uid1', 'meeting-session-1')
+    monkeypatch.setattr(conversations_db, 'get_conversation', MagicMock(return_value=None))
+    monkeypatch.setattr(developer.lifecycle_service, 'create_processing_conversation', MagicMock(return_value=True))
+    monkeypatch.setattr(developer.lifecycle_service, 'persist_processed_conversation', MagicMock())
+
+    def _process(_uid, _language, conversation):
+        conversation.status = ConversationStatus.completed
+        conversation.structured.title = 'Design review'
+        return conversation
+
+    monkeypatch.setattr(developer, 'process_conversation', _process)
+    arrival = MagicMock()
+    monkeypatch.setattr(proactive_engine, 'persist_capture_arrival_intent', arrival)
+
+    response = developer._create_conversation_from_segments(
+        'uid1', _request(client_session_id='meeting-session-1', conversation_role='meeting')
+    )
+
+    assert response.id == expected_id
+    arrival.assert_called_once_with(
+        'uid1', conversation_id=expected_id, summary='Design review', is_desktop_meeting=True
+    )
+
+
+def test_postprocess_arrival_adapter_failure_does_not_fail_creation(monkeypatch):
+    expected_id = developer._from_segments_conversation_id('uid1', 'meeting-session-1')
+    monkeypatch.setattr(conversations_db, 'get_conversation', MagicMock(return_value=None))
+    monkeypatch.setattr(developer.lifecycle_service, 'create_processing_conversation', MagicMock(return_value=True))
+    persisted = MagicMock()
+    monkeypatch.setattr(developer.lifecycle_service, 'persist_processed_conversation', persisted)
+
+    def _process(_uid, _language, conversation):
+        conversation.status = ConversationStatus.completed
+        conversation.structured.title = 'Design review'
+        return conversation
+
+    monkeypatch.setattr(developer, 'process_conversation', _process)
+    monkeypatch.setattr(developer, 'persist_desktop_meeting_arrival_best_effort', MagicMock())
+
+    response = developer._create_conversation_from_segments(
+        'uid1', _request(client_session_id='meeting-session-1', conversation_role='meeting')
+    )
+
+    assert response.id == expected_id
+    persisted.assert_called_once()
+
+
 def test_client_session_id_retry_returns_existing_without_processing(monkeypatch):
     expected_id = developer._from_segments_conversation_id('uid1', 'local-session-1')
     monkeypatch.setattr(
@@ -271,6 +329,65 @@ def test_client_session_id_retry_returns_existing_without_processing(monkeypatch
     assert response.status == 'processing'
     assert response.discarded is False
     process.assert_not_called()
+
+
+def test_completed_desktop_meeting_retry_repairs_missing_arrival(monkeypatch):
+    expected_id = developer._from_segments_conversation_id('uid1', 'meeting-session-1')
+    monkeypatch.setattr(
+        conversations_db,
+        'get_conversation',
+        MagicMock(
+            return_value={
+                'id': expected_id,
+                'source': 'desktop',
+                'status': 'completed',
+                'discarded': False,
+                'structured': {'title': 'Design review'},
+                'external_data': {'conversation_role': 'meeting'},
+            }
+        ),
+    )
+    process = MagicMock()
+    monkeypatch.setattr(developer, 'process_conversation', process)
+    arrival = MagicMock()
+    monkeypatch.setattr(proactive_engine, 'persist_capture_arrival_intent', arrival)
+
+    response = developer._create_conversation_from_segments(
+        'uid1', _request(client_session_id='meeting-session-1', conversation_role='meeting')
+    )
+
+    assert response.id == expected_id
+    process.assert_not_called()
+    arrival.assert_called_once_with(
+        'uid1', conversation_id=expected_id, summary='Design review', is_desktop_meeting=True
+    )
+
+
+def test_completed_ambient_retry_cannot_reclassify_conversation_as_meeting(monkeypatch):
+    expected_id = developer._from_segments_conversation_id('uid1', 'ambient-session-1')
+    monkeypatch.setattr(
+        conversations_db,
+        'get_conversation',
+        MagicMock(
+            return_value={
+                'id': expected_id,
+                'source': 'desktop',
+                'status': 'completed',
+                'discarded': False,
+                'structured': {'title': 'Ambient capture'},
+                'external_data': {'conversation_role': 'ambient'},
+            }
+        ),
+    )
+    monkeypatch.setattr(developer, 'process_conversation', MagicMock())
+    arrival = MagicMock()
+    monkeypatch.setattr(proactive_engine, 'persist_capture_arrival_intent', arrival)
+
+    developer._create_conversation_from_segments(
+        'uid1', _request(client_session_id='ambient-session-1', conversation_role='meeting')
+    )
+
+    arrival.assert_not_called()
 
 
 def test_client_session_id_concurrent_claim_loser_returns_existing_without_processing(monkeypatch):
@@ -335,6 +452,48 @@ def test_client_session_id_claim_is_released_when_processing_fails(monkeypatch):
     delete.assert_called_once_with('uid1', expected_id)
 
 
+def test_from_segments_returns_byok_rate_limit_and_releases_idempotent_claim(monkeypatch):
+    """Typed processing errors retain the existing idempotent cleanup path."""
+    expected_id = developer._from_segments_conversation_id('uid1', 'byok-rate-limited-session')
+    delete = MagicMock()
+    monkeypatch.setattr(conversations_db, 'get_conversation', MagicMock(return_value=None))
+    monkeypatch.setattr(developer.lifecycle_service, 'create_processing_conversation', MagicMock(return_value=True))
+    monkeypatch.setattr(conversations_db, 'delete_conversation', delete)
+    monkeypatch.setattr(
+        developer,
+        'process_conversation',
+        MagicMock(
+            side_effect=HTTPException(
+                status_code=429,
+                detail={
+                    'code': 'byok_rate_limit',
+                    'message': 'The configured provider account is rate limited. Please retry later or check its limits.',
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        developer,
+        'resolve_client_device_from_request',
+        lambda _request: SimpleNamespace(client_device_id=None, platform=None),
+    )
+
+    app = FastAPI()
+    app.include_router(developer.router)
+    response = TestClient(app).post(
+        '/v1/conversations/from-segments',
+        json=_request(client_session_id='byok-rate-limited-session').model_dump(mode='json'),
+    )
+
+    assert response.status_code == 429
+    assert response.json()['detail']['code'] == 'byok_rate_limit'
+    assert (
+        response.json()['detail']['message']
+        == 'The configured provider account is rate limited. Please retry later or check its limits.'
+    )
+    delete.assert_called_once_with('uid1', expected_id)
+
+
 def test_client_session_id_atomic_claim_winner_processes_once(monkeypatch):
     process = MagicMock(side_effect=lambda _uid, _language, conversation: conversation)
     monkeypatch.setattr(conversations_db, 'get_conversation', MagicMock(return_value=None))
@@ -353,3 +512,33 @@ def test_client_session_id_aliases_and_trimming():
 
     assert request.client_session_id == 'local-client-1'
     assert desktop_request.client_session_id == 'local-conversation-1'
+
+
+def test_from_segments_renews_processing_lease_during_live_processing(monkeypatch):
+    """A from-segments conversation admitted to processing must keep its admission
+    lease fresh while process_conversation runs, so the crash-orphan sweep never
+    terminalizes active work (#10461 ownership fence for every live producer)."""
+    import threading
+
+    lease_renewed = threading.Event()
+
+    def fake_renew(_uid, _conversation_id):
+        lease_renewed.set()
+        return True
+
+    monkeypatch.setattr(developer.lifecycle_service.jobs_db, 'renew_processing_lease', fake_renew)
+    monkeypatch.setattr(developer.lifecycle_service, '_processing_lease_renewal_interval', lambda: 0.001)
+
+    def blocking_process(_uid, _language, conversation):
+        assert lease_renewed.wait(timeout=5.0), 'lease not renewed during from-segments processing'
+        conversation.status = ConversationStatus.completed
+        return conversation
+
+    monkeypatch.setattr(conversations_db, 'get_conversation', MagicMock(return_value=None))
+    monkeypatch.setattr(developer.lifecycle_service, 'create_processing_conversation', MagicMock(return_value=True))
+    monkeypatch.setattr(developer.lifecycle_service, 'persist_processed_conversation', MagicMock())
+    monkeypatch.setattr(developer, 'process_conversation', blocking_process)
+
+    developer._create_conversation_from_segments('uid1', _request(client_session_id='local-session-lease'))
+
+    assert lease_renewed.is_set()

@@ -6,16 +6,26 @@ import SwiftUI
 @MainActor
 extension AppState {
   func requestMicrophonePermission() {
+    let status = AudioCaptureService.authorizationStatus()
+    log("Requesting microphone permission, current status: \(status.rawValue)")
+
+    // Already denied/restricted: requestAccess would return false without ever showing a
+    // prompt, so the user who just asked to record would get silence. Tell them the real
+    // problem and open the pane that fixes it instead.
+    if MicrophoneCaptureAuthorizationPolicy.action(for: status) == .surfacePermissionAlert {
+      hasMicrophonePermission = false
+      surfaceMicrophonePermissionAlert()
+      return
+    }
+
+    let shellWasSuspended = ShellSummon.suspendForPermissionPrompt()
     // Activate app to ensure permission dialog appears
     NSApp.activate()
-
-    log(
-      "Requesting microphone permission, current status: \(AudioCaptureService.authorizationStatus().rawValue)"
-    )
 
     Task {
       let granted = await AudioCaptureService.requestPermission()
       await MainActor.run {
+        if shellWasSuspended { ShellSummon.restoreAfterPermissionPrompt() }
         self.hasMicrophonePermission = granted
         log("Microphone permission request completed, granted: \(granted)")
         if granted {
@@ -83,7 +93,8 @@ extension AppState {
         appPath: relaunchURL.path,
         isNonProduction: AppBuild.isNonProduction,
         automationPort: DesktopAutomationLaunchOptions.port,
-        terminatingProcessIdentifier: ProcessInfo.processInfo.processIdentifier),
+        terminatingProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
+        automationUIPresentationMode: DesktopAutomationLaunchOptions.uiPresentationMode),
     ]
 
     do {
@@ -125,11 +136,17 @@ extension AppState {
     appPath: String,
     isNonProduction: Bool,
     automationPort: UInt16,
-    terminatingProcessIdentifier: Int32
+    terminatingProcessIdentifier: Int32,
+    automationUIPresentationMode: DesktopAutomationUIPresentationMode = .normal
   ) -> String {
     var openCommand = "open \"\(appPath)\""
     if isNonProduction {
-      openCommand = "open -n \"\(appPath)\" --args \(DesktopAutomationLaunchOptions.portPrefix)\(automationPort)"
+      let quietFlag =
+        automationUIPresentationMode == .normal
+        ? "" : " \(DesktopAutomationLaunchOptions.uiPresentationPrefix)\(automationUIPresentationMode.rawValue)"
+      let backgroundFlag = automationUIPresentationMode == .quiet ? " -g" : ""
+      openCommand =
+        "open -n\(backgroundFlag) \"\(appPath)\" --args \(DesktopAutomationLaunchOptions.portPrefix)\(automationPort)\(quietFlag)"
     }
     return
       "sleep 0.5 && while kill -0 \(terminatingProcessIdentifier) 2>/dev/null; do sleep 0.1; done && \(openCommand)"
@@ -139,7 +156,6 @@ extension AppState {
   /// This clears onboarding state without touching production data or system permissions.
   nonisolated func resetOnboardingAndRestart() {
     log("Resetting onboarding state for current app...")
-    let graphAuthorizationSnapshot = RuntimeOwnerIdentity.captureAuthorizationSnapshot()
 
     // Update live @AppStorage-backed state on the main thread *before* clearing
     // UserDefaults. DesktopHomeView handles .resetOnboardingRequested by setting
@@ -169,43 +185,30 @@ extension AppState {
     log("Cleared onboarding chat persistence")
 
     Task { @MainActor [self] in
-      // Clear knowledge graph (local + server) so the onboarding chart starts fresh
-      if let graphAuthorizationSnapshot {
-        let authorization = LocalMutationAuthorization {
-          RuntimeOwnerIdentity.isAuthorizationCurrent(graphAuthorizationSnapshot)
-        }
-        do {
-          try await KnowledgeGraphStorage.shared.clearAll(authorization: authorization)
-          log("Cleared local knowledge graph storage")
-        } catch LocalMutationAuthorizationError.revoked {
-          log("Skipped stale-owner local knowledge graph reset")
-        } catch {
-          logError("Failed to clear local knowledge graph during onboarding reset", error: error)
-        }
-      } else {
-        log("Skipped local knowledge graph reset without an authenticated owner")
-      }
-      do {
-        try await APIClient.shared.deleteKnowledgeGraph()
-        log("Cleared server knowledge graph")
-      } catch {
-        logError("Failed to clear server knowledge graph during onboarding reset", error: error)
-      }
-
-      // Clear the default stream through the kernel journal's durable,
-      // generation-fenced delete outbox. No UI surface may write or delete
-      // backend chat state directly.
+      // Clear only setup-owned local conversation state. A re-walkthrough must
+      // never mutate the user's normal local or backend chat history.
       if let chatProvider = ChatProvider.mainInstance {
-        if await chatProvider.clearDefaultJournalForOnboardingReset() {
-          log("Queued default chat reset through kernel journal")
+        if await chatProvider.clearOnboardingJournal() {
+          log("Cleared onboarding journal")
         } else {
-          log("Failed to queue default chat reset through kernel journal")
+          log("Failed to clear onboarding journal")
         }
       } else {
-        log("Default chat reset deferred: main chat provider unavailable")
+        log("Onboarding journal reset deferred: main chat provider unavailable")
       }
 
       try? await Task.sleep(nanoseconds: 150_000_000)
+
+      // Reset Onboarding is someone deliberately asking to see first run again,
+      // so the cinematic intro replays — the one onboarding key sign-out keeps
+      // and this site clears. It is the last write before the relaunch on
+      // purpose: the onboarding view re-mounted the moment this method dropped
+      // hasCompletedOnboarding, and that doomed session marks the intro played
+      // on appear. See OnboardingFlow.armIntroReplayForOnboardingReset.
+      OnboardingFlow.armIntroReplayForOnboardingReset()
+      UserDefaults.standard.synchronize()
+      log("Armed the cinematic intro to replay on the next launch")
+
       // Keep onboarding reset scoped to the current app instance.
       // It must not mutate production defaults, shared local data, or TCC permissions.
       self.restartApp()
@@ -394,12 +397,36 @@ extension AppState {
     hasSystemAudioPermission = status == .granted
   }
 
-  /// Check system audio permission support and keep the last observed tap result fresh.
+  /// Prime the same Core Audio tap used by real capture and reconcile its
+  /// observed outcome into the shared permission state.
+  func primeSystemAudioPermission() async -> Bool {
+    guard #available(macOS 14.4, *) else {
+      recordSystemAudioCaptureOutcome(.unsupported)
+      return false
+    }
+
+    return await reconcileSystemAudioPermission {
+      await SystemAudioCaptureService.primePermission()
+    }
+  }
+
+  /// Injectable production seam for reconciling a real tap attempt. Keeping
+  /// this at AppState makes onboarding and normal capture share one owner.
+  func reconcileSystemAudioPermission(
+    testPermission: @escaping @Sendable () async -> Bool
+  ) async -> Bool {
+    let granted = await testPermission()
+    recordSystemAudioCaptureOutcome(granted ? .granted : .denied)
+    return granted
+  }
+
+  /// Check system audio support and retain the last observed tap result.
   ///
   /// Core Audio process taps (macOS 14.4+) do not provide a preflight API. Unlike
   /// Screen Recording, the truthful product state comes from a real tap outcome.
-  /// If no tap is currently running, a previously granted outcome is no longer a
-  /// fresh assertion, so refreshes return to unknown until the next tap succeeds.
+  /// An idle refresh cannot produce newer evidence, so it must not erase the
+  /// successful prime performed during onboarding. A later real tap failure
+  /// replaces this state through `recordSystemAudioCaptureOutcome`.
   func checkSystemAudioPermission() {
     guard #available(macOS 14.4, *) else {
       recordSystemAudioCaptureOutcome(.unsupported)
@@ -408,8 +435,6 @@ extension AppState {
 
     if let service = systemAudioCaptureService as? SystemAudioCaptureService, service.capturing {
       recordSystemAudioCaptureOutcome(.granted)
-    } else if systemAudioPermissionStatus == .granted {
-      recordSystemAudioCaptureOutcome(.unknown)
     }
   }
 
@@ -423,6 +448,7 @@ extension AppState {
     }
 
     log("System audio: Testing capture...")
+    let shellWasSuspended = ShellSummon.suspendForPermissionPrompt()
 
     // Create a test capture service
     let testService = SystemAudioCaptureService()
@@ -444,6 +470,7 @@ extension AppState {
         // Mark permission as granted
         recordSystemAudioCaptureOutcome(.granted)
         log("System audio: Permission verified")
+        if shellWasSuspended { ShellSummon.restoreAfterPermissionPrompt() }
 
       } catch {
         logError("System audio: Test capture failed", error: error)
@@ -453,10 +480,27 @@ extension AppState {
         if let url = URL(
           string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         {
+          ShellSummon.suspendForPermissionPrompt()
           NSWorkspace.shared.open(url)
         }
       }
     }
+  }
+
+  /// Stop the active session and wait until its microphone IOProc is physically gone.
+  /// Settings uses this boundary before reopening capture with changed preferences.
+  func prepareTranscriptionRestartAfterSettingsChange() async -> Bool {
+    guard isTranscribing else { return false }
+
+    let stoppedCapture = audioCaptureService
+    let stopCompletion = stopTranscription()
+    let restartGeneration = recordingGeneration
+    await stopCompletion?.value
+    await stoppedCapture?.waitForPhysicalStop()
+
+    // A user may have toggled listening while teardown was in flight. Never let
+    // this older settings change reopen capture over that newer decision.
+    return recordingGeneration == restartGeneration && !isTranscribing
   }
 }
 

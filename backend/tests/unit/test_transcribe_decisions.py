@@ -14,10 +14,12 @@ from utils.transcribe_decisions import (
     is_user_self_match,
     normalize_codec_frame,
     normalize_language,
+    normalize_listen_source,
     person_id_for_client,
     recording_session_id_for_lifecycle_event,
     select_recording_session_id,
     select_translation_language,
+    should_attach_to_existing_in_progress,
     should_enable_speaker_identification,
     should_flush_final_multi_channel_mix,
     should_force_single_language,
@@ -49,19 +51,16 @@ def test_startup_decisions_pin_current_overrides():
 def test_codec_frame_normalization_pins_special_codecs():
     opus = normalize_codec_frame('opus_fs320')
     assert opus.codec == 'opus'
-    assert opus.frame_size == 320
     assert opus.lc3_chunk_size is None
     assert opus.lc3_frame_duration_us is None
 
     lc3 = normalize_codec_frame('lc3_fs1030')
     assert lc3.codec == 'lc3'
-    assert lc3.frame_size == 160
     assert lc3.lc3_chunk_size == 30
     assert lc3.lc3_frame_duration_us == 10000
 
     pcm = normalize_codec_frame('pcm8')
     assert pcm.codec == 'pcm8'
-    assert pcm.frame_size == 160
 
 
 def test_translation_language_gating():
@@ -217,6 +216,20 @@ def test_conversation_lifecycle_actions():
         )
         == ConversationLifecycleAction.process_and_create_new
     )
+
+
+def test_cross_source_in_progress_must_not_attach():
+    assert should_attach_to_existing_in_progress(existing_source='omi', request_source='omi') is True
+    assert should_attach_to_existing_in_progress(existing_source='omi', request_source=None) is True
+    assert should_attach_to_existing_in_progress(existing_source='omi', request_source='web') is False
+    assert should_attach_to_existing_in_progress(existing_source='web', request_source='desktop') is False
+    assert should_attach_to_existing_in_progress(existing_source=None, request_source='') is True
+    # source=web is not a ConversationSource member → unknown (same as create persistence).
+    assert normalize_listen_source('Web') == 'unknown'
+    assert normalize_listen_source(None) == 'omi'
+    assert normalize_listen_source('web') == 'unknown'
+    assert should_attach_to_existing_in_progress(existing_source='unknown', request_source='web') is True
+    assert should_attach_to_existing_in_progress(existing_source='omi', request_source='unknown') is False
 
 
 def test_recording_session_identity_retries_and_rollovers_are_distinct():

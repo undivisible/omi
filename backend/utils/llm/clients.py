@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 import hashlib
 import logging
 import os
@@ -27,7 +28,6 @@ from utils.llm.byok_errors import handle_llm_error
 from utils.llm.model_config import (
     MODEL_QOS_PROFILES,
     _ANTHROPIC_ONLY_FEATURES,
-    _DEFAULT_CONFIG,
     _OPENROUTER_TEMPERATURES,
     _PERPLEXITY_ONLY_FEATURES,
     _PINNED_FEATURES,
@@ -36,12 +36,12 @@ from utils.llm.model_config import (
     _active_profile_name,
     _byok_profile,
     _byok_profile_name,
+    get_default_config,
     get_active_profile,
     get_active_profile_name,
     get_all_configured_features,
     get_byok_profile,
     get_byok_profile_name,
-    get_default_config,
     get_model,
     get_provider,
     get_route_options,
@@ -51,15 +51,15 @@ from utils.llm.model_config import (
     supports_cache_retention,
     supports_prompt_cache,
     _get_model_config,
-)
+)  # noqa: F401 - legacy clients-module QoS re-exports
 from utils.llm.providers import (
-    ChatGoogleGenerativeAI,  # backward-compat re-export (was here pre-refactor)
+    ChatGoogleGenerativeAI,
     GEMINI_OPENAI_BASE_URL,
     get_default_client,
     get_or_create_gemini_llm as _get_or_create_gemini_llm,
     get_or_create_openai_compatible_llm,
     _llm_cache,
-)
+)  # noqa: F401 - legacy clients-module provider re-exports
 
 try:
     from utils.llm.providers import get_or_create_omi_gateway_llm
@@ -77,6 +77,7 @@ try:
         CHAT_STRUCTURED_AUTO_LANE_ID,
         feature_auto_lane_id,
         raise_if_gateway_feature_mode_blocks_direct_model_surface,
+        should_route_chat_agent_through_gateway,
         should_route_features_through_gateway,
     )
 except ImportError as exc:
@@ -90,6 +91,9 @@ except ImportError as exc:
         return f"omi:auto:{feature.replace('_', '-')}"
 
     def should_route_features_through_gateway() -> bool:
+        return False
+
+    def should_route_chat_agent_through_gateway() -> bool:
         return False
 
     def raise_if_gateway_feature_mode_blocks_direct_model_surface(_surface: str) -> None:
@@ -113,11 +117,11 @@ except ImportError:
 
 
 try:
-    from utils.llm.gateway_anthropic import get_gateway_first_anthropic_client
+    from utils.llm.gateway_anthropic import get_gateway_anthropic_client
 except ImportError:
 
-    def get_gateway_first_anthropic_client(*, legacy_client, agent_model):
-        return legacy_client
+    def get_gateway_anthropic_client(*, byok_api_key=None):
+        raise RuntimeError('Omi gateway Anthropic client is unavailable')
 
 
 try:
@@ -128,14 +132,6 @@ except ImportError as exc:
 
     def maybe_wrap_dev_gateway_shadow(*, legacy_model, **_kwargs):
         return legacy_model
-
-
-try:
-    from utils.llm.gateway_serving import wrap_gateway_with_legacy_fallback
-except ImportError:
-    # Stubbed/isolated test environments may lack langchain_core submodules.
-    def wrap_gateway_with_legacy_fallback(*, gateway_model, **_kwargs):
-        return gateway_model
 
 
 from utils.llm.usage_tracker import get_usage_callback
@@ -208,22 +204,30 @@ class _AnthropicClientProxy:
 
     def _resolve(self) -> anthropic.AsyncAnthropic:
         byok = get_byok_key('anthropic')
+        # Only pin Anthropic Messages through the gateway when agentic chat is
+        # itself on the gateway route. FEATURE_MODE alone must not force the
+        # Anthropic Messages client onto omi:auto:chat-agent (surface mismatch
+        # with the Luna/OpenAI lane).
+        if should_route_chat_agent_through_gateway():
+            return get_gateway_anthropic_client(byok_api_key=byok)
         if byok:
-            legacy = _cached_anthropic(byok)
-            if should_route_features_through_gateway():
-                return get_gateway_first_anthropic_client(
-                    legacy_client=legacy,
-                    agent_model=ANTHROPIC_AGENT_MODEL,
-                    byok_api_key=byok,
-                )
-            return legacy
-        return get_gateway_first_anthropic_client(
-            legacy_client=self._default_client(),
-            agent_model=ANTHROPIC_AGENT_MODEL,
-        )
+            return _cached_anthropic(byok)
+        return self._default_client()
 
     def __getattr__(self, name: str):
         return getattr(self._resolve(), name)
+
+
+def get_direct_anthropic_client(*, byok_api_key: str | None = None) -> anthropic.AsyncAnthropic:
+    """Return Anthropic without consulting the feature gateway switch.
+
+    Desktop chat has a legacy Anthropic fallback for BYOK and specialist model
+    requests. Calling the module-level proxy there would re-enter the managed
+    gateway whenever the global feature flag is enabled.
+    """
+    if byok_api_key:
+        return _cached_anthropic(byok_api_key)
+    return anthropic_client._default_client()
 
 
 class _OpenAIEmbeddingsProxy:
@@ -449,7 +453,13 @@ def _get_or_create_openrouter_llm(
     return get_or_create_openai_compatible_llm('openrouter', model_name, streaming, options)
 
 
-def get_llm(feature: str, streaming: bool = False, cache_key: Optional[str] = None) -> BaseChatModel:
+def get_llm(
+    feature: str,
+    streaming: bool = False,
+    cache_key: Optional[str] = None,
+    prompt_cache_options: Optional[dict[str, str]] = None,
+    request_timeout: float | None = None,
+) -> BaseChatModel:
     """Get the LLM client for a feature based on the active Model QoS profile.
 
     Works for OpenAI, Gemini, OpenRouter, and other registered OpenAI-compatible
@@ -500,21 +510,12 @@ def get_llm(feature: str, streaming: bool = False, cache_key: Optional[str] = No
             byok_key = byok_key_for_profile
 
     if byok_key and gateway_feature_mode:
-        byok_client = _create_byok_client(model, provider, byok_key, streaming, feature)
-        if byok_client is None:
-            raise RuntimeError(f'BYOK is not supported for feature={feature} provider={provider}')
-        gateway_model = get_or_create_omi_gateway_llm_for_byok(
+        result = get_or_create_omi_gateway_llm_for_byok(
             feature_auto_lane_id(feature),
             provider=_effective_byok_provider(model, provider),
             api_key=byok_key,
             streaming=streaming,
             feature=feature,
-        )
-        result = wrap_gateway_with_legacy_fallback(
-            feature=feature,
-            gateway_model=gateway_model,
-            legacy_model=byok_client,
-            credential_source='service_forwarded_byok',
         )
     elif byok_key:
         byok_client = _create_byok_client(model, provider, byok_key, streaming, feature)
@@ -524,20 +525,15 @@ def get_llm(feature: str, streaming: bool = False, cache_key: Optional[str] = No
             else get_default_client(model, provider, streaming, get_route_options(feature, model, provider))
         )
     elif gateway_feature_mode:
-        gateway_model = get_or_create_omi_gateway_llm(feature_auto_lane_id(feature), streaming, feature=feature)
-        if provider in {'anthropic', 'perplexity'}:
-            # No OpenAI-compatible LangChain legacy client for these providers.
-            result = gateway_model
-        else:
-            legacy_model = get_default_client(model, provider, streaming, get_route_options(feature, model, provider))
-            result = wrap_gateway_with_legacy_fallback(
-                feature=feature,
-                gateway_model=gateway_model,
-                legacy_model=legacy_model,
-                credential_source='omi_managed',
-            )
+        gateway_options = {"request_timeout": request_timeout} if request_timeout is not None else None
+        result = get_or_create_omi_gateway_llm(
+            feature_auto_lane_id(feature), streaming, gateway_options, feature=feature
+        )
     else:
-        result = get_default_client(model, provider, streaming, get_route_options(feature, model, provider))
+        route_options = get_route_options(feature, model, provider)
+        if request_timeout is not None:
+            route_options = {**route_options, "request_timeout": request_timeout}
+        result = get_default_client(model, provider, streaming, route_options)
 
     result = maybe_wrap_dev_gateway_shadow(
         feature=feature,
@@ -547,8 +543,22 @@ def get_llm(feature: str, streaming: bool = False, cache_key: Optional[str] = No
         legacy_model=result,
     )
 
+    cache_params: Dict[str, Any] = {}
     if cache_key and supports_prompt_cache(model):
-        return result.bind(prompt_cache_key=cache_key)
+        cache_params['prompt_cache_key'] = cache_key
+    # prompt_cache_options is accepted but not sent. The field is a contract
+    # between this caller and the gateway, and the two deploy from separate
+    # pipelines, so the gateway can be running a build that predates it and
+    # rejects the request outright. Sending it broke conversation structuring
+    # for every request that routed through the gateway.
+    #
+    # Restore the send once a gateway carrying the field in its forwarded
+    # parameters is deployed. It travels in extra_body when it returns: the
+    # client validates named arguments before building the request, so a
+    # version that predates the field raises in process instead of reaching the
+    # gateway at all.
+    if cache_params:
+        return result.bind(**cache_params)
     return result
 
 
@@ -595,13 +605,13 @@ def get_qos_info() -> Dict[str, Dict[str, str]]:
 
 
 # Startup logging — log active profile so cost issues are traceable.
-_active_profile = get_active_profile()
-logger.info('Model QoS profile=%s (%d features)', get_active_profile_name(), len(_active_profile))
-for _feat, (_model, _provider) in sorted(_active_profile.items()):
+_active_qos_profile = get_active_profile()
+logger.info('Model QoS profile=%s (%d features)', get_active_profile_name(), len(_active_qos_profile))
+for _feat, (_model, _provider) in sorted(_active_qos_profile.items()):
     logger.info('  QoS %s: %s [%s]', _feat, _model, _provider)
 logger.info('BYOK QoS profile=%s', get_byok_profile_name())
 
-_so_gemini = {f for f in _active_profile if is_structured_output_feature(f) and _get_model_config(f)[1] == 'gemini'}
+_so_gemini = {f for f in _active_qos_profile if is_structured_output_feature(f) and _get_model_config(f)[1] == 'gemini'}
 if _so_gemini:
     logger.info('Structured output features on Gemini: %s', ', '.join(sorted(_so_gemini)))
 
@@ -647,7 +657,7 @@ class _LazyClientProxy:
 
 
 def _create_legacy_llm_mini() -> ChatOpenAI:
-    return ChatOpenAI(model='gpt-4.1-mini', callbacks=[_usage_callback], request_timeout=120, max_retries=1)
+    return ChatOpenAI(model=get_model('learnings'), callbacks=[_usage_callback], request_timeout=120, max_retries=1)
 
 
 llm_mini = _LazyClientProxy(_create_legacy_llm_mini)

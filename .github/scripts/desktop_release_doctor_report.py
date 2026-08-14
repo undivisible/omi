@@ -18,6 +18,7 @@ METRIC_CONTRACTS = (
     "backend_error_rate",
     "fallback_outcomes",
     "provider_runtime",
+    "proactive_delivery",
 )
 
 
@@ -189,14 +190,13 @@ def _github_surfaces(snapshot: dict[str, object], release_id: str, phase: str) -
 
 def _manifest_surface(snapshot: dict[str, object], release_id: str, tag_sha: str, phase: str, metadata: dict[str, object]) -> dict[str, object]:
     manifest = snapshot.get("manifest", _unavailable("collector did not provide the canonical manifest"))
-    expected = {"release_id": release_id, "source_sha": tag_sha}
+    expected = {"release_id": release_id, "app_source_sha": tag_sha}
     if _is_unavailable(manifest):
         return _unavailable_surface("canonical_manifest", expected, manifest)
 
     manifest_id = _optional_string(manifest.get("release_id")) if isinstance(manifest, dict) else ""
-    manifest_sha = _optional_string(manifest.get("source_sha")) if isinstance(manifest, dict) else ""
-    qualification = manifest.get("qualification") if isinstance(manifest, dict) else None
-    evidence = _optional_string(qualification.get("evidence_asset")) if isinstance(qualification, dict) else ""
+    manifest_sha = _optional_string(manifest.get("app_source_sha")) if isinstance(manifest, dict) else ""
+    evidence = _optional_string(manifest.get("qualification_evidence_asset")) if isinstance(manifest, dict) else ""
     metadata_evidence = _optional_string(metadata.get("qualifiedBetaEvidence"))
     required = phase in {"beta", "stable"}
     valid = manifest_id == release_id and manifest_sha == tag_sha and (not required or bool(evidence))
@@ -216,7 +216,7 @@ def _manifest_surface(snapshot: dict[str, object], release_id: str, tag_sha: str
         "PASS" if valid else "FAIL",
         "aligned" if valid else "reversible_drift",
         {**expected, "qualification_evidence": metadata_evidence or None},
-        {"release_id": manifest_id or None, "source_sha": manifest_sha or None, "qualification_evidence": evidence or None},
+        {"release_id": manifest_id or None, "app_source_sha": manifest_sha or None, "qualification_evidence": evidence or None},
         message,
         repair,
     )
@@ -311,34 +311,58 @@ def _stable_surfaces(snapshot: dict[str, object], release_id: str, tag_sha: str,
     surfaces: list[dict[str, object]] = []
     backend = snapshot.get("backend", _unavailable("backend health was not collected"))
     if _is_unavailable(backend):
-        surfaces.append(_unavailable_surface("backend_health_identity", {"release_tag": release_id, "release_sha": tag_sha}, backend))
+        surfaces.append(
+            _unavailable_surface(
+                "backend_health_identity",
+                {"service": "omi-desktop-backend", "release_channel": "production", "chat_contract_version": "1"},
+                backend,
+            )
+        )
     else:
-        valid = backend.get("release_tag") == release_id and backend.get("release_sha") == tag_sha and backend.get("release_channel") == "stable"
+        backend_sha = _optional_string(backend.get("backend_release_sha"))
+        valid = (
+            backend.get("status") == "healthy"
+            and backend.get("service") == "omi-desktop-backend"
+            and backend.get("backend_release_channel") == "production"
+            and backend.get("chat_contract_version") == "1"
+            and bool(re.fullmatch(r"[0-9a-f]{40}", backend_sha))
+        )
         surfaces.append(
             _surface(
                 "backend_health_identity",
                 "PASS" if valid else "FAIL",
                 "aligned" if valid else "customer_visible_split",
-                {"release_tag": release_id, "release_sha": tag_sha, "release_channel": "stable"},
-                {key: backend.get(key) for key in ("release_tag", "release_sha", "release_channel", "revision")},
-                "Backend health reports the stable release identity." if valid else "Backend health identity differs from the stable release.",
+                {
+                    "service": "omi-desktop-backend",
+                    "backend_release_channel": "production",
+                    "chat_contract_version": "1",
+                },
+                {
+                    key: backend.get(key)
+                    for key in (
+                        "status",
+                        "service",
+                        "backend_release_sha",
+                        "backend_release_channel",
+                        "chat_contract_version",
+                        "revision",
+                    )
+                },
+                "Backend health reports a compatible independent production identity."
+                if valid
+                else "Backend health is missing a compatible independent production identity.",
             )
         )
-    tracking = snapshot.get("tracking", _unavailable("tracking tag was not collected"))
-    if _is_unavailable(tracking):
-        surfaces.append(_unavailable_surface("tracking_tag", {"source_sha": tag_sha}, tracking))
-    else:
-        actual_sha = _optional_string(tracking.get("desktop_backend_prod_deployed_sha"))
-        surfaces.append(
-            _surface(
-                "tracking_tag",
-                "PASS" if actual_sha == tag_sha else "FAIL",
-                "aligned" if actual_sha == tag_sha else "reversible_drift",
-                {"source_sha": tag_sha},
-                {"source_sha": actual_sha or None},
-                "Production tracking tag matches the release source." if actual_sha == tag_sha else "Production tracking tag does not match the release source.",
-            )
+    surfaces.append(
+        _surface(
+            "tracking_tag",
+            "PASS",
+            "safe_residue",
+            {"status": "retired"},
+            {"status": "retired"},
+            "Legacy tracking tag is retired; independent backend provenance comes from health identity and deploy evidence.",
         )
+    )
     return surfaces
 
 
@@ -363,15 +387,30 @@ def _operational_surfaces(snapshot: dict[str, object]) -> tuple[list[dict[str, o
 
     metrics = _metric_report(snapshot.get("metrics"))
     unavailable = [metric["id"] for metric in metrics if metric["status"] == "unavailable"]
+    unhealthy = [metric["id"] for metric in metrics if metric.get("health_status") == "unhealthy"]
+    unknown = [metric["id"] for metric in metrics if metric.get("health_status") == "unknown"]
+    metric_surface_status = "FAIL" if unhealthy else "WARN" if unavailable or unknown else "PASS"
     surfaces.append(
         _surface(
             "operational_metrics",
-            "WARN" if unavailable else "PASS",
-            "unknown" if unavailable else "aligned",
-            {"all_metrics_available": True},
-            {"unavailable_metrics": unavailable} if unavailable else {"all_metrics_available": True},
-            "Unavailable metrics remain explicit and are not rendered as release success."
-            if unavailable
+            metric_surface_status,
+            # Keep the classification vocabulary closed: an unhealthy metric is
+            # customer-visible drift, not a new schema value.  The evidence
+            # report is consumed by release automation, so an undeclared label
+            # here would turn a useful failure into an invalid artifact.
+            "customer_visible_split" if unhealthy else "unknown" if unavailable or unknown else "aligned",
+            {"all_metrics_available": True, "unhealthy_metrics": []},
+            {
+                "unavailable_metrics": unavailable,
+                "unknown_metrics": unknown,
+                "unhealthy_metrics": unhealthy,
+            }
+            if unavailable or unknown or unhealthy
+            else {"all_metrics_available": True, "unhealthy_metrics": []},
+            "Unhealthy operational metrics block a clean release-doctor result."
+            if unhealthy
+            else "Unavailable or low-sample metrics remain explicit and are not rendered as release success."
+            if unavailable or unknown
             else "Operational metrics include their denominators, windows, and minimum samples.",
         )
     )
@@ -397,6 +436,20 @@ def _metric_report(metrics: object) -> list[dict[str, object]]:
                 }
             )
             continue
+        health_status = value.get("health_status")
+        if name == "proactive_delivery" and health_status not in {"healthy", "unhealthy", "unknown"}:
+            report.append(
+                {
+                    "id": name,
+                    "status": "unavailable",
+                    "denominator": None,
+                    "time_window": None,
+                    "minimum_sample": None,
+                    "value": None,
+                    "reason": "proactive delivery metric omitted a valid health_status",
+                }
+            )
+            continue
         report.append(
             {
                 "id": name,
@@ -405,6 +458,9 @@ def _metric_report(metrics: object) -> list[dict[str, object]]:
                 "time_window": value.get("time_window"),
                 "minimum_sample": value.get("minimum_sample"),
                 "value": value.get("value"),
+                "health_status": health_status,
+                "numerator": value.get("numerator"),
+                "alarm_reason": value.get("alarm_reason"),
             }
         )
     return report

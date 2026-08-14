@@ -747,11 +747,6 @@ class AppLocalizationsMs extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Pelan anda diperbaharui pada $date.';
-  }
-
-  @override
   String get basicPlan => 'Pelan Percuma';
 
   @override
@@ -1797,20 +1792,6 @@ class AppLocalizationsMs extends AppLocalizations {
   String get lovingOmi => 'Suka Omi?';
 
   @override
-  String get leaveReviewIos =>
-      'Bantu kami menjangkau lebih ramai orang dengan meninggalkan ulasan di App Store. Maklum balas anda sangat bermakna bagi kami!';
-
-  @override
-  String get leaveReviewAndroid =>
-      'Bantu kami menjangkau lebih ramai orang dengan meninggalkan ulasan di Google Play Store. Maklum balas anda sangat bermakna bagi kami!';
-
-  @override
-  String get rateOnAppStore => 'Nilai di App Store';
-
-  @override
-  String get rateOnGooglePlay => 'Nilai di Google Play';
-
-  @override
   String get maybeLater => 'Mungkin nanti';
 
   @override
@@ -2147,6 +2128,18 @@ class AppLocalizationsMs extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ Edit Memori';
+
+  @override
+  String get pinAsBaseline => 'Sematkan sebagai asas';
+
+  @override
+  String get unpinAsBaseline => 'Nyahsemat daripada asas';
+
+  @override
+  String get baselineMemory => 'Memori asas';
+
+  @override
+  String get alwaysInContext => 'Sentiasa dalam konteks';
 
   @override
   String get memoryContentHint => 'Saya suka makan ais krim...';
@@ -9631,10 +9624,10 @@ class AppLocalizationsMs extends AppLocalizations {
       'Data anda dilindungi secara lalai dengan penyulitan yang kuat, dan anda mengawal cara ia disimpan dan digunakan.';
 
   @override
-  String get sttModelAccuracy => 'Accuracy';
+  String get sttModelAccuracy => 'Ketepatan';
 
   @override
-  String get whisperModelSizeBase => 'Base';
+  String get whisperModelSizeBase => 'Asas';
 
   @override
   String get cloudTranscription => 'Transkripsi awan';
@@ -9643,52 +9636,52 @@ class AppLocalizationsMs extends AppLocalizations {
   String get sttProviderDeepgram => 'Deepgram';
 
   @override
-  String get deleteOnDeviceModel => 'Delete Model';
+  String get deleteOnDeviceModel => 'Padam Model';
 
   @override
-  String get deleteOnDeviceModelConfirm => 'Are you sure you want to delete this model?';
+  String get deleteOnDeviceModelConfirm => 'Adakah anda pasti mahu memadam model ini?';
 
   @override
-  String get onDeviceModelDownloaded => 'Downloaded';
+  String get onDeviceModelDownloaded => 'Dimuat turun';
 
   @override
-  String get sttModelFaster => 'Faster';
+  String get sttModelFaster => 'Lebih pantas';
 
   @override
   String get sttFilterAuto => 'Auto';
 
   @override
-  String get sttModelHigher => 'Higher';
+  String get sttModelHigher => 'Lebih tinggi';
 
   @override
-  String get whisperModelSizeLarge => 'Large';
+  String get whisperModelSizeLarge => 'Besar';
 
   @override
-  String get sttModelLower => 'Lower';
+  String get sttModelLower => 'Lebih rendah';
 
   @override
-  String get whisperModelSizeMedium => 'Medium';
+  String get whisperModelSizeMedium => 'Sederhana';
 
   @override
-  String get onDeviceModelDeleted => 'Model deleted';
+  String get onDeviceModelDeleted => 'Model dipadam';
 
   @override
-  String get onDeviceModelDownloadFailed => 'Model download failed';
+  String get onDeviceModelDownloadFailed => 'Muat turun model gagal';
 
   @override
-  String get onDeviceModelDownloadFailedDesc => 'Failed to download Whisper model. Please try again.';
+  String get onDeviceModelDownloadFailedDesc => 'Gagal memuat turun model Whisper. Sila cuba lagi.';
 
   @override
-  String get onDeviceModelDownloadSuccess => 'Model downloaded';
+  String get onDeviceModelDownloadSuccess => 'Model dimuat turun';
 
   @override
-  String get onDeviceModelDownloadSuccessDesc => 'Whisper model downloaded successfully';
+  String get onDeviceModelDownloadSuccessDesc => 'Model Whisper berjaya dimuat turun';
 
   @override
-  String get onDeviceModelSize => 'Model Size';
+  String get onDeviceModelSize => 'Saiz Model';
 
   @override
-  String get sttNone => 'None';
+  String get sttNone => 'Tiada';
 
   @override
   String get onDeviceTranscription => 'Transkripsi pada peranti';
@@ -9697,10 +9690,10 @@ class AppLocalizationsMs extends AppLocalizations {
   String get onDeviceTranscriptionDesc => 'Transkripsi diproses secara tempatan pada peranti anda';
 
   @override
-  String get sttModelSlower => 'Slower';
+  String get sttModelSlower => 'Lebih perlahan';
 
   @override
-  String get whisperModelSizeSmall => 'Small';
+  String get whisperModelSizeSmall => 'Kecil';
 
   @override
   String get sttProviderSoniox => 'Soniox';
@@ -9715,10 +9708,10 @@ class AppLocalizationsMs extends AppLocalizations {
   String get sttProviderSpeechmatics => 'Speechmatics';
 
   @override
-  String get sttModelSpeed => 'Speed';
+  String get sttModelSpeed => 'Kelajuan';
 
   @override
-  String get whisperModelSizeTiny => 'Tiny';
+  String get whisperModelSizeTiny => 'Sangat kecil';
 
   @override
   String get transcriptionLanguage => 'Bahasa transkripsi';
@@ -9733,51 +9726,52 @@ class AppLocalizationsMs extends AppLocalizations {
   String get whisperModelDesc => 'Pilih model untuk transkripsi pada peranti';
 
   @override
-  String get downgradeToFreemiumTitle => 'Downgrade to Freemium?';
+  String get downgradeToFreemiumTitle => 'Turun taraf ke pelan percuma?';
 
   @override
-  String get downgradeLimitationsHeading => 'You will experience these limitations:';
+  String get downgradeLimitationsHeading => 'Anda akan mengalami had berikut:';
 
   @override
-  String get downgradeLimitBattery => '7x battery consumption';
+  String get downgradeLimitBattery => 'Penggunaan bateri 7x ganda';
 
   @override
-  String get downgradeLimitQuality => '30% less transcription quality';
+  String get downgradeLimitQuality => 'Kualiti transkripsi 30% lebih rendah';
 
   @override
-  String get downgradeLimitDelay => '5-7 second delay';
+  String get downgradeLimitDelay => 'Kelewatan 5-7 saat';
 
   @override
-  String get downgradeLimitSpeakers => 'Cannot identify speakers';
+  String get downgradeLimitSpeakers => 'Tidak dapat mengenal pasti penutur';
 
   @override
-  String get downgradeAnyway => 'Downgrade Anyway';
+  String get downgradeAnyway => 'Turun Taraf Juga';
 
   @override
-  String get googleCalendarNotConnected => 'Google Calendar Not Connected';
+  String get googleCalendarNotConnected => 'Kalendar Google Tidak Disambungkan';
 
   @override
-  String get googleCalendarConnectPrompt => 'Connect your Google Calendar to link conversations to calendar events.';
+  String get googleCalendarConnectPrompt =>
+      'Sambungkan Kalendar Google anda untuk memautkan perbualan kepada acara kalendar.';
 
   @override
   String linkedToEvent(String title) {
-    return 'Linked to \"$title\"';
+    return 'Dipautkan kepada “$title”';
   }
 
   @override
-  String get failedToLinkCalendarEvent => 'Failed to link calendar event';
+  String get failedToLinkCalendarEvent => 'Gagal memautkan acara kalendar';
 
   @override
-  String get thanksForYourFeedback => 'Thanks for your feedback!';
+  String get thanksForYourFeedback => 'Terima kasih atas maklum balas anda!';
 
   @override
-  String get copyMessage => 'Copy message';
+  String get copyMessage => 'Salin mesej';
 
   @override
-  String get searchSettings => 'Search settings…';
+  String get searchSettings => 'Cari tetapan…';
 
   @override
-  String get errorLoadingAudio => 'Error loading audio';
+  String get errorLoadingAudio => 'Ralat memuatkan audio';
 
   @override
   String get rayBanMetaMicPickerTitle => 'Pilih mikrofon Ray-Ban Meta anda';
@@ -9797,4 +9791,78 @@ class AppLocalizationsMs extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Tidak dapat menyambung ke mikrofon itu. Pastikan ia disambungkan dalam Tetapan iPhone.';
+
+  @override
+  String get syncStatusTooOld => 'Terlalu lama untuk disegerakkan — Omi tidak boleh menerimanya';
+
+  @override
+  String get planSheetChooseYourPlan => 'Pilih pelan anda untuk membuka Omi tanpa had.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Tersedia di Mac, mudah alih dan web';
+
+  @override
+  String get popularBadge => 'POPULAR';
+
+  @override
+  String get worksOnDesktop => 'Berfungsi pada desktop';
+
+  @override
+  String get noDesktopAccess => 'Tidak berfungsi pada desktop';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months bulan / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bulan percuma',
+      one: '1 bulan percuma',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi adalah percuma, tetapi versi percuma mempunyai had yang menjejaskan pengalaman anda:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'Lengah 5-7 saat (bukan masa nyata)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Turun ke versi percuma';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Dapatkan akses tanpa had secara percuma';
+
+  @override
+  String get shareDataForTraining => 'Kongsi data untuk latihan';
+
+  @override
+  String get yourRequestUnderReview => 'Permintaan anda sedang disemak';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Pembaruan diperlukan';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Instal aplikasi Omi terbaru untuk melanjutkan setelah migrasi akun.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Migrasi sedang berlangsung';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Akun Anda sedang dimigrasi. Fitur produk dijeda hingga migrasi selesai.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Akun Anda dalam pemeliharaan setelah rollback migrasi. Beberapa data yang lebih baru mungkin terisolasi.';
+
+  @override
+  String get accountCutoverOpenStore => 'Buka toko';
 }

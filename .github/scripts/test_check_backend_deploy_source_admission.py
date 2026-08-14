@@ -10,7 +10,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parents[1]
 CHECKER_PATH = SCRIPT_DIR / "check_backend_deploy_source_admission.py"
@@ -42,6 +41,7 @@ def admitted_run(**overrides: object) -> dict[str, object]:
         "event": "push",
         "status": "completed",
         "conclusion": "success",
+        "run_attempt": 1,
         "head_branch": "main",
         "head_sha": SHA,
         "head_repository": {"full_name": REPOSITORY},
@@ -63,6 +63,18 @@ class ReleaseAdmissionVerifierTests(unittest.TestCase):
             sha=SHA,
             repository=REPOSITORY,
         )
+
+    def test_backend_default_accepts_successful_rerun(self) -> None:
+        VERIFIER.validate_admission(self.payload(run_attempt=2), sha=SHA, repository=REPOSITORY)
+
+    def test_gateway_first_attempt_mode_rejects_rerun(self) -> None:
+        with self.assertRaisesRegex(VERIFIER.ReleaseAdmissionError, "no successful main"):
+            VERIFIER.validate_admission(
+                self.payload(run_attempt=2),
+                sha=SHA,
+                repository=REPOSITORY,
+                require_first_attempt=True,
+            )
 
     def test_rejects_ambiguous_release_sha(self) -> None:
         for value in ("main", "a" * 7, "A" * 40, "0" * 40):
@@ -132,6 +144,7 @@ class WorkflowContractTests(unittest.TestCase):
             CHECKER.MANUAL_WORKFLOW_PATH,
             CHECKER.ADMISSION_VERIFIER_PATH,
             CHECKER.AUTO_ADMISSION_VERIFIER_PATH,
+            CHECKER.DEPLOY_BACKEND_STACK_ACTION,
         ):
             source = ROOT / relative
             destination = temp / relative
@@ -143,8 +156,13 @@ class WorkflowContractTests(unittest.TestCase):
     def mutate(self, root: Path, relative: Path, old: str, new: str) -> None:
         path = root / relative
         text = path.read_text(encoding="utf-8")
-        self.assertIn(old, text)
-        path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        if old in text:
+            path.write_text(text.replace(old, new, 1), encoding="utf-8")
+            return
+        composite = root / CHECKER.DEPLOY_BACKEND_STACK_ACTION
+        composite_text = composite.read_text(encoding="utf-8")
+        self.assertIn(old, composite_text)
+        composite.write_text(composite_text.replace(old, new, 1), encoding="utf-8")
 
     def move_step_before(self, root: Path, relative: Path, name: str, before_name: str) -> None:
         path = root / relative
@@ -169,14 +187,26 @@ class WorkflowContractTests(unittest.TestCase):
 
         root = self.fixture_root()
         self.mutate(root, CHECKER.AUTO_WORKFLOW_PATH, 'workflows: ["Release Eligibility"]', 'workflows: ["Build"]')
-        self.assertIn("auto backend deploy must consume completed Release Eligibility runs on main", CHECKER.validate(root))
+        self.assertIn(
+            "auto backend deploy must consume completed Release Eligibility runs on main", CHECKER.validate(root)
+        )
 
     def test_auto_workflow_rejects_wrong_event_conclusion_branch_or_repository(self) -> None:
         cases = (
             ("event", "workflow_run.event == 'push'", "workflow_run.event == 'pull_request'", "push-originated"),
-            ("conclusion", "workflow_run.conclusion == 'success'", "workflow_run.conclusion == 'failure'", "successful Release Eligibility"),
+            (
+                "conclusion",
+                "workflow_run.conclusion == 'success'",
+                "workflow_run.conclusion == 'failure'",
+                "successful Release Eligibility",
+            ),
             ("rerun", "workflow_run.run_attempt == 1", "workflow_run.run_attempt == 2", "first run attempt"),
-            ("branch", "workflow_run.head_branch == 'main'", "workflow_run.head_branch == 'release'", "main Release Eligibility"),
+            (
+                "branch",
+                "workflow_run.head_branch == 'main'",
+                "workflow_run.head_branch == 'release'",
+                "main Release Eligibility",
+            ),
             (
                 "repository",
                 "workflow_run.head_repository.full_name == github.repository",
@@ -190,11 +220,107 @@ class WorkflowContractTests(unittest.TestCase):
                 self.mutate(root, CHECKER.AUTO_WORKFLOW_PATH, old, new)
                 self.assertTrue(
                     any(
-                        expected in error
-                        or "exactly the fail-closed Release Eligibility predicate" in error
+                        expected in error or "exactly the fail-closed Release Eligibility predicate" in error
                         for error in CHECKER.validate(root)
                     )
                 )
+
+    def test_auto_workflow_rejects_scope_bypasses_or_cloud_access(self) -> None:
+        cases = (
+            (
+                "readiness scope dependency",
+                "    needs: scope\n",
+                "",
+                "auto source-admission job must depend on the scope decision",
+            ),
+            (
+                "scope output predicate",
+                "needs.scope.outputs.applies == 'true' &&",
+                "needs.scope.outputs.applies == 'false' &&",
+                "auto source-admission job must use exactly the fail-closed Release Eligibility predicate",
+            ),
+            (
+                "triggering SHA checkout",
+                "ref: ${{ github.event.workflow_run.head_sha }}\n          # The parent diff is the only local scope proof required here. Current\n          # main/supersession proof below is bounded to read-only GitHub API calls.\n          fetch-depth: 2",
+                "ref: main\n          # The parent diff is the only local scope proof required here. Current\n          # main/supersession proof below is bounded to read-only GitHub API calls.\n          fetch-depth: 2",
+                "auto backend scope decision must inspect the triggering SHA",
+            ),
+            (
+                "full-history checkout",
+                "fetch-depth: 2",
+                "fetch-depth: 0",
+                "auto backend scope decision must shallow-fetch only the triggering parent diff",
+            ),
+            (
+                "parent diff",
+                'git diff --name-only "$parent_sha" "$RELEASE_SHA"',
+                'git diff --name-only "$parent_sha" HEAD',
+                "auto backend scope decision must diff the triggering SHA against its parent",
+            ),
+            (
+                "cloud authentication",
+                "    runs-on: ubuntu-latest\n    outputs:",
+                "    runs-on: ubuntu-latest\n    steps:\n      - uses: google-github-actions/auth@v3\n    outputs:",
+                "auto backend scope decision must not authenticate to cloud services",
+            ),
+        )
+        for name, old, new, expected in cases:
+            with self.subTest(name=name):
+                root = self.fixture_root()
+                self.mutate(root, CHECKER.AUTO_WORKFLOW_PATH, old, new)
+                self.assertIn(expected, CHECKER.validate(root))
+
+    def test_auto_workflow_rejects_api_supersession_proof_bypasses(self) -> None:
+        """Static tripwires for the bounded read-only green no-op proof."""
+        cases = (
+            (
+                "wrong ref endpoint",
+                '"$api_base/repos/$GITHUB_REPOSITORY/git/ref/heads/main"',
+                '"$api_base/repos/$GITHUB_REPOSITORY/git/ref/heads/release"',
+                "auto backend scope decision must resolve current main through the bounded GitHub ref API",
+            ),
+            (
+                "wrong compare endpoint",
+                '"$api_base/repos/$GITHUB_REPOSITORY/compare/$RELEASE_SHA...$main_sha"',
+                '"$api_base/repos/$GITHUB_REPOSITORY/compare/$main_sha...$RELEASE_SHA"',
+                "auto backend scope decision must compare the immutable triggering SHA to the resolved main SHA through GitHub",
+            ),
+            (
+                "unbound compare identity",
+                '.base_commit.sha == $release_sha and .head_commit.sha == $main_sha',
+                '.base_commit.sha == $main_sha and .head_commit.sha == $release_sha',
+                "auto backend scope decision must bind compare base and head identities",
+            ),
+            (
+                "unconfirmed supersession",
+                'if [[ "$comparison" == "behind" ]]; then',
+                'if [[ "$comparison" == "identical" ]]; then',
+                "auto backend scope decision must only no-op after confirmed supersession",
+            ),
+            (
+                "ambiguous API becomes no-op",
+                "supersession API proof was unavailable or ambiguous; preserving fail-closed source admission",
+                "GitHub compare confirmed triggering SHA $RELEASE_SHA is behind current main $main_sha",
+                "auto backend scope decision must treat API or identity ambiguity as guarded admission",
+            ),
+            (
+                "local merge-base proof",
+                "git diff --name-only \"$parent_sha\" \"$RELEASE_SHA\"",
+                "git merge-base --is-ancestor \"$RELEASE_SHA\" \"$main_sha\"\n          git diff --name-only \"$parent_sha\" \"$RELEASE_SHA\"",
+                "auto backend scope decision must not use local merge-base supersession proof",
+            ),
+            (
+                "local main history fetch",
+                "git diff --name-only \"$parent_sha\" \"$RELEASE_SHA\"",
+                "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main\n          git diff --name-only \"$parent_sha\" \"$RELEASE_SHA\"",
+                "auto backend scope decision must not fetch local main history for supersession",
+            ),
+        )
+        for name, old, new, expected in cases:
+            with self.subTest(name=name):
+                root = self.fixture_root()
+                self.mutate(root, CHECKER.AUTO_WORKFLOW_PATH, old, new)
+                self.assertIn(expected, CHECKER.validate(root))
 
     def test_auto_workflow_rejects_stale_or_unverified_source_admission(self) -> None:
         cases = (
@@ -212,8 +338,8 @@ class WorkflowContractTests(unittest.TestCase):
             ),
             (
                 "stale main fetch",
-                "git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main",
-                "git fetch --no-tags origin +refs/heads/release:refs/remotes/origin/main",
+                "RELEASE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}\n        run: |\n          set -euo pipefail\n          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main",
+                "RELEASE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}\n        run: |\n          set -euo pipefail\n          git fetch --no-tags origin +refs/heads/release:refs/remotes/origin/main",
                 "automatic source admission must refresh current main",
             ),
             (
@@ -242,7 +368,7 @@ class WorkflowContractTests(unittest.TestCase):
             ),
             (
                 "old SHA checked out for deployment",
-                "ref: ${{ needs.firestore_readiness.outputs.admitted_sha }}",
+                "ref: ${{ inputs.admitted_sha }}",
                 "ref: ${{ github.event.workflow_run.head_sha }}",
                 "auto backend deploy must check out the verified SHA before deployment",
             ),
@@ -373,10 +499,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.mutate(
             root,
             CHECKER.MANUAL_WORKFLOW_PATH,
-            "  deploy:\n    needs: [validate-production-boundary, firestore_readiness]\n    if: >-\n      github.ref == 'refs/heads/main' &&\n      github.event.inputs.mode == 'deploy'\n",
-            "  deploy:\n    needs: [validate-production-boundary, firestore_readiness]\n    if: >-\n      github.ref == 'refs/heads/main' &&\n      github.event.inputs.mode == 'deploy' || true\n",
+            "  deploy:\n    needs: [validate-production-boundary, firestore_readiness, record_break_glass]\n    if: >-\n      always() &&\n      github.ref == 'refs/heads/main' &&\n      github.event.inputs.mode == 'deploy' &&\n      needs.validate-production-boundary.result == 'success' &&\n      needs.firestore_readiness.result == 'success' &&\n      (needs.record_break_glass.result == 'success' || needs.record_break_glass.result == 'skipped')\n",
+            "  deploy:\n    needs: [validate-production-boundary, firestore_readiness, record_break_glass]\n    if: >-\n      always() &&\n      github.ref == 'refs/heads/main' &&\n      github.event.inputs.mode == 'deploy' &&\n      needs.validate-production-boundary.result == 'success' &&\n      needs.firestore_readiness.result == 'success' &&\n      true\n",
         )
-        self.assertIn("manual deployment must use exactly the main-ref deploy condition", CHECKER.validate(root))
+        self.assertIn("manual deployment must gate break-glass deploys on a successful audit record", CHECKER.validate(root))
 
     def test_manual_workflow_rejects_boundary_dependency_bypasses(self) -> None:
         root = self.fixture_root()
@@ -395,11 +521,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.mutate(
             root,
             CHECKER.MANUAL_WORKFLOW_PATH,
-            "needs: [validate-production-boundary, firestore_readiness]",
+            "needs: [validate-production-boundary, firestore_readiness, record_break_glass]",
             "needs: firestore_readiness",
         )
         self.assertIn(
-            "manual deployment must depend on production-boundary validation and source admission",
+            "manual deployment must depend on production-boundary validation, source admission, and break-glass audit",
             CHECKER.validate(root),
         )
 
@@ -407,8 +533,8 @@ class WorkflowContractTests(unittest.TestCase):
         root = self.fixture_root()
         self.mutate(
             root,
-            CHECKER.AUTO_WORKFLOW_PATH,
-            "ref: ${{ needs.firestore_readiness.outputs.admitted_sha }}",
+            CHECKER.DEPLOY_BACKEND_STACK_ACTION,
+            "ref: ${{ inputs.admitted_sha }}",
             "ref: ${{ github.sha }}",
         )
         errors = CHECKER.validate(root)
@@ -418,8 +544,8 @@ class WorkflowContractTests(unittest.TestCase):
         root = self.fixture_root()
         self.mutate(
             root,
-            CHECKER.AUTO_WORKFLOW_PATH,
-            '--commit-sha "${{ needs.firestore_readiness.outputs.admitted_sha }}"',
+            CHECKER.DEPLOY_BACKEND_STACK_ACTION,
+            '--commit-sha "${{ inputs.admitted_sha }}"',
             '--commit-sha "${{ github.sha }}"',
         )
         errors = CHECKER.validate(root)
@@ -429,11 +555,15 @@ class WorkflowContractTests(unittest.TestCase):
     def test_manual_workflow_rejects_arbitrary_branch_or_missing_proof_query(self) -> None:
         root = self.fixture_root()
         self.mutate(root, CHECKER.MANUAL_WORKFLOW_PATH, "      release_sha:\n", "      branch:\n")
-        self.assertIn("manual backend deploy must keep release_sha optional for traffic-only repair", CHECKER.validate(root))
+        self.assertIn(
+            "manual backend deploy must keep release_sha optional for traffic-only repair", CHECKER.validate(root)
+        )
 
         root = self.fixture_root()
         self.mutate(root, CHECKER.MANUAL_WORKFLOW_PATH, "        required: false", "        required: true")
-        self.assertIn("manual backend deploy must keep release_sha optional for traffic-only repair", CHECKER.validate(root))
+        self.assertIn(
+            "manual backend deploy must keep release_sha optional for traffic-only repair", CHECKER.validate(root)
+        )
 
         root = self.fixture_root()
         self.mutate(
@@ -461,19 +591,48 @@ class WorkflowContractTests(unittest.TestCase):
         self.mutate(
             root,
             CHECKER.MANUAL_WORKFLOW_PATH,
-            "ref: ${{ needs.firestore_readiness.outputs.admitted_sha }}",
-            "ref: ${{ github.event.inputs.release_sha }}",
+            "admitted_sha: ${{ needs.firestore_readiness.outputs.admitted_sha }}",
+            "admitted_sha: ${{ github.event.inputs.release_sha }}",
         )
-        self.assertIn("manual deployment must check out the admitted SHA", CHECKER.validate(root))
+        self.assertIn("manual deployment must pass the admitted SHA to the deploy composite action", CHECKER.validate(root))
 
         root = self.fixture_root()
         self.mutate(
             root,
-            CHECKER.MANUAL_WORKFLOW_PATH,
-            '--commit-sha "${{ needs.firestore_readiness.outputs.admitted_sha }}"',
+            CHECKER.DEPLOY_BACKEND_STACK_ACTION,
+            '--commit-sha "${{ inputs.admitted_sha }}"',
             '--commit-sha "${{ github.event.inputs.release_sha }}"',
         )
         self.assertIn("manual deployment must bind every release vector to the admitted SHA", CHECKER.validate(root))
+
+        root = self.fixture_root()
+        self.mutate(
+            root,
+            CHECKER.DEPLOY_BACKEND_STACK_ACTION,
+            "ref: ${{ github.sha }}",
+            "ref: ${{ github.event.inputs.release_sha }}",
+        )
+        self.assertIn(
+            "manual backend deploy must stage workflow-owned control scripts from github.sha",
+            CHECKER.validate(root),
+        )
+
+    def test_commented_composite_reference_does_not_expand_contract(self) -> None:
+        root = self.fixture_root()
+        self.mutate(
+            root,
+            CHECKER.MANUAL_WORKFLOW_PATH,
+            "        uses: ./.github/actions/deploy-backend-stack",
+            "        # uses: ./.github/actions/deploy-backend-stack",
+        )
+        self.mutate(
+            root,
+            CHECKER.DEPLOY_BACKEND_STACK_ACTION,
+            '--commit-sha "${{ inputs.admitted_sha }}"',
+            '--commit-sha "${{ github.sha }}"',
+        )
+        errors = CHECKER.validate(root)
+        self.assertIn("manual deployment must bind every release vector to the admitted SHA", errors)
 
     def test_traffic_only_repair_remains_separate_from_source_admission(self) -> None:
         root = self.fixture_root()
@@ -495,7 +654,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("traffic-only repair must use exactly the main-ref recovery condition", CHECKER.validate(root))
 
         root = self.fixture_root()
-        self.mutate(root, CHECKER.MANUAL_WORKFLOW_PATH, "          ref: main", "          ref: ${{ github.event.inputs.release_sha }}")
+        self.mutate(
+            root,
+            CHECKER.MANUAL_WORKFLOW_PATH,
+            "          ref: main",
+            "          ref: ${{ github.event.inputs.release_sha }}",
+        )
         self.assertIn("traffic-only repair must not require a release-source admission", CHECKER.validate(root))
 
 

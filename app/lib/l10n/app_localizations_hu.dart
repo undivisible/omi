@@ -750,11 +750,6 @@ class AppLocalizationsHu extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Előfizetésed $date-án megújul.';
-  }
-
-  @override
   String get basicPlan => 'Ingyenes csomag';
 
   @override
@@ -1802,20 +1797,6 @@ class AppLocalizationsHu extends AppLocalizations {
   String get lovingOmi => 'Tetszik az Omi?';
 
   @override
-  String get leaveReviewIos =>
-      'Segíts elérni több embert azzal, hogy értékelést hagysz az App Store-ban. A visszajelzésed sokat jelent nekünk!';
-
-  @override
-  String get leaveReviewAndroid =>
-      'Segíts elérni több embert azzal, hogy értékelést hagysz a Google Play Áruházban. A visszajelzésed sokat jelent nekünk!';
-
-  @override
-  String get rateOnAppStore => 'Értékelés az App Store-ban';
-
-  @override
-  String get rateOnGooglePlay => 'Értékelés a Google Play-en';
-
-  @override
   String get maybeLater => 'Talán később';
 
   @override
@@ -2153,6 +2134,18 @@ class AppLocalizationsHu extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ Emlékezet szerkesztése';
+
+  @override
+  String get pinAsBaseline => 'Rögzítés alapként';
+
+  @override
+  String get unpinAsBaseline => 'Rögzítés feloldása alapként';
+
+  @override
+  String get baselineMemory => 'Alapmemória';
+
+  @override
+  String get alwaysInContext => 'Mindig a kontextusban';
 
   @override
   String get memoryContentHint => 'Szeretek fagyit enni...';
@@ -9646,10 +9639,10 @@ class AppLocalizationsHu extends AppLocalizations {
       'Az adataid alapértelmezés szerint erős titkosítással védettek, és te döntöd el, hogyan tárolják és használják őket.';
 
   @override
-  String get sttModelAccuracy => 'Accuracy';
+  String get sttModelAccuracy => 'Pontosság';
 
   @override
-  String get whisperModelSizeBase => 'Base';
+  String get whisperModelSizeBase => 'Alap';
 
   @override
   String get cloudTranscription => 'Felhő átírás';
@@ -9658,52 +9651,52 @@ class AppLocalizationsHu extends AppLocalizations {
   String get sttProviderDeepgram => 'Deepgram';
 
   @override
-  String get deleteOnDeviceModel => 'Delete Model';
+  String get deleteOnDeviceModel => 'Modell törlése';
 
   @override
-  String get deleteOnDeviceModelConfirm => 'Are you sure you want to delete this model?';
+  String get deleteOnDeviceModelConfirm => 'Biztosan törölni szeretnéd ezt a modellt?';
 
   @override
-  String get onDeviceModelDownloaded => 'Downloaded';
+  String get onDeviceModelDownloaded => 'Letöltve';
 
   @override
-  String get sttModelFaster => 'Faster';
+  String get sttModelFaster => 'Gyorsabb';
 
   @override
-  String get sttFilterAuto => 'Auto';
+  String get sttFilterAuto => 'Automatikus';
 
   @override
-  String get sttModelHigher => 'Higher';
+  String get sttModelHigher => 'Magasabb';
 
   @override
-  String get whisperModelSizeLarge => 'Large';
+  String get whisperModelSizeLarge => 'Nagy';
 
   @override
-  String get sttModelLower => 'Lower';
+  String get sttModelLower => 'Alacsonyabb';
 
   @override
-  String get whisperModelSizeMedium => 'Medium';
+  String get whisperModelSizeMedium => 'Közepes';
 
   @override
-  String get onDeviceModelDeleted => 'Model deleted';
+  String get onDeviceModelDeleted => 'Modell törölve';
 
   @override
-  String get onDeviceModelDownloadFailed => 'Model download failed';
+  String get onDeviceModelDownloadFailed => 'A modell letöltése nem sikerült';
 
   @override
-  String get onDeviceModelDownloadFailedDesc => 'Failed to download Whisper model. Please try again.';
+  String get onDeviceModelDownloadFailedDesc => 'A Whisper modell letöltése nem sikerült. Próbáld újra.';
 
   @override
-  String get onDeviceModelDownloadSuccess => 'Model downloaded';
+  String get onDeviceModelDownloadSuccess => 'Modell letöltve';
 
   @override
-  String get onDeviceModelDownloadSuccessDesc => 'Whisper model downloaded successfully';
+  String get onDeviceModelDownloadSuccessDesc => 'A Whisper modell letöltése sikerült';
 
   @override
-  String get onDeviceModelSize => 'Model Size';
+  String get onDeviceModelSize => 'Modell mérete';
 
   @override
-  String get sttNone => 'None';
+  String get sttNone => 'Nincs';
 
   @override
   String get onDeviceTranscription => 'Eszközön történő átírás';
@@ -9712,10 +9705,10 @@ class AppLocalizationsHu extends AppLocalizations {
   String get onDeviceTranscriptionDesc => 'Az átírás helyileg történik az eszközödön';
 
   @override
-  String get sttModelSlower => 'Slower';
+  String get sttModelSlower => 'Lassabb';
 
   @override
-  String get whisperModelSizeSmall => 'Small';
+  String get whisperModelSizeSmall => 'Kicsi';
 
   @override
   String get sttProviderSoniox => 'Soniox';
@@ -9730,10 +9723,10 @@ class AppLocalizationsHu extends AppLocalizations {
   String get sttProviderSpeechmatics => 'Speechmatics';
 
   @override
-  String get sttModelSpeed => 'Speed';
+  String get sttModelSpeed => 'Sebesség';
 
   @override
-  String get whisperModelSizeTiny => 'Tiny';
+  String get whisperModelSizeTiny => 'Apró';
 
   @override
   String get transcriptionLanguage => 'Átírás nyelve';
@@ -9748,51 +9741,52 @@ class AppLocalizationsHu extends AppLocalizations {
   String get whisperModelDesc => 'Válaszd ki a modellt az eszközön történő átíráshoz';
 
   @override
-  String get downgradeToFreemiumTitle => 'Downgrade to Freemium?';
+  String get downgradeToFreemiumTitle => 'Visszaváltasz az ingyenes csomagra?';
 
   @override
-  String get downgradeLimitationsHeading => 'You will experience these limitations:';
+  String get downgradeLimitationsHeading => 'A következő korlátozásokkal kell számolnod:';
 
   @override
-  String get downgradeLimitBattery => '7x battery consumption';
+  String get downgradeLimitBattery => '7-szeres akkumulátorfogyasztás';
 
   @override
-  String get downgradeLimitQuality => '30% less transcription quality';
+  String get downgradeLimitQuality => '30%-kal gyengébb átírási minőség';
 
   @override
-  String get downgradeLimitDelay => '5-7 second delay';
+  String get downgradeLimitDelay => '5-7 másodperces késleltetés';
 
   @override
-  String get downgradeLimitSpeakers => 'Cannot identify speakers';
+  String get downgradeLimitSpeakers => 'A beszélők nem azonosíthatók';
 
   @override
-  String get downgradeAnyway => 'Downgrade Anyway';
+  String get downgradeAnyway => 'Váltás mindenképp';
 
   @override
-  String get googleCalendarNotConnected => 'Google Calendar Not Connected';
+  String get googleCalendarNotConnected => 'A Google naptár nincs csatlakoztatva';
 
   @override
-  String get googleCalendarConnectPrompt => 'Connect your Google Calendar to link conversations to calendar events.';
+  String get googleCalendarConnectPrompt =>
+      'Csatlakoztasd a Google naptáradat, hogy a beszélgetéseket naptáreseményekhez kapcsolhasd.';
 
   @override
   String linkedToEvent(String title) {
-    return 'Linked to \"$title\"';
+    return 'Összekapcsolva ezzel: „$title”';
   }
 
   @override
-  String get failedToLinkCalendarEvent => 'Failed to link calendar event';
+  String get failedToLinkCalendarEvent => 'A naptáresemény összekapcsolása nem sikerült';
 
   @override
-  String get thanksForYourFeedback => 'Thanks for your feedback!';
+  String get thanksForYourFeedback => 'Köszönjük a visszajelzést!';
 
   @override
-  String get copyMessage => 'Copy message';
+  String get copyMessage => 'Üzenet másolása';
 
   @override
-  String get searchSettings => 'Search settings…';
+  String get searchSettings => 'Beállítások keresése…';
 
   @override
-  String get errorLoadingAudio => 'Error loading audio';
+  String get errorLoadingAudio => 'Hiba a hang betöltésekor';
 
   @override
   String get rayBanMetaMicPickerTitle => 'Válaszd ki a Ray-Ban Meta mikrofonját';
@@ -9812,4 +9806,78 @@ class AppLocalizationsHu extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Nem sikerült csatlakozni ehhez a mikrofonhoz. Ellenőrizd, hogy csatlakoztatva van-e az iPhone Beállításokban.';
+
+  @override
+  String get syncStatusTooOld => 'Túl régi a szinkronizáláshoz — az Omi nem tudja elfogadni';
+
+  @override
+  String get planSheetChooseYourPlan => 'Válaszd ki a csomagodat a korlátlan Omi feloldásához.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Elérhető Macen, mobilon és weben';
+
+  @override
+  String get popularBadge => 'NÉPSZERŰ';
+
+  @override
+  String get worksOnDesktop => 'Működik asztali gépen';
+
+  @override
+  String get noDesktopAccess => 'Nem működik asztali gépen';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months hónap / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count hónap ingyen',
+      one: '1 hónap ingyen',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Az Omi ingyenes, de az ingyenes verziónak vannak korlátai, amelyek befolyásolják az élményt:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5–7 másodperces késleltetés (nem valós idejű)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Váltás az ingyenes verzióra';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Szerezz ingyenes korlátlan hozzáférést';
+
+  @override
+  String get shareDataForTraining => 'Adatmegosztás tanításhoz';
+
+  @override
+  String get yourRequestUnderReview => 'A kérelmedet vizsgáljuk';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Frissítés szükséges';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Telepítse a legújabb Omi alkalmazást a fiókmigráció utáni folytatáshoz.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Migráció folyamatban';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'A fiókja migrálás alatt áll. A termékfunkciók szünetelnek a migráció befejezéséig.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'A fiókja karbantartás alatt áll a migráció visszavonása után. Egyes újabb adatok elkülönítve maradhatnak.';
+
+  @override
+  String get accountCutoverOpenStore => 'Áruház megnyitása';
 }

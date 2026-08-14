@@ -68,6 +68,17 @@ FULL_RUN_GLOBS = (
     'backend/utils/encryption.py',
 )
 
+# These paths participate in the location-context contract below. They are
+# intentionally narrow exceptions to the generic model/database full-suite
+# fallback so local pre-push feedback remains focused; CI still owns --all.
+NARROW_LOCATION_CONTEXT_PATHS = frozenset(
+    {
+        'backend/database/users.py',
+        'backend/models/geolocation.py',
+        'backend/models/users.py',
+    }
+)
+
 MEMORY_POLICY_CORE_PATH_PREFIXES = ('backend/utils/memory/',)
 
 MEMORY_POLICY_CORE_PATH_GLOBS = (
@@ -83,7 +94,33 @@ MEMORY_POLICY_CORE_TESTS = (
     'testing/e2e/test_canonical_memory_pipeline.py',
 )
 
+# Monitoring telemetry contract sources (#9587). Referenced from both the
+# AREA_TESTS path->test mapping and is_selectable_backend_path's
+# intentional-exception check below — single source so the two lists cannot
+# drift apart and silently stop selecting the monitoring unit contracts.
+MONITORING_CONTRACT_SOURCES = (
+    'backend/charts/monitoring/expected-targets.prod.yaml',
+    'backend/charts/monitoring/kube-prometheus-stack/',
+    'backend/charts/monitoring/alerts/',
+    'backend/charts/monitoring/alert-rules.json',
+    'backend/charts/monitoring/prometheus-stackdriver-exporter/',
+    'backend/charts/parakeet/templates/servicemonitor.yaml',
+)
+
 AREA_TESTS = (
+    (
+        (
+            'backend/database/users.py',
+            'backend/models/geolocation.py',
+            'backend/models/users.py',
+            'backend/routers/developer.py',
+            'backend/routers/users.py',
+            'backend/utils/retrieval/agentic.py',
+            'backend/utils/retrieval/graph.py',
+        ),
+        (),
+        ('tests/unit/test_location_context_consent.py', 'tests/unit/test_chat_async_offload.py'),
+    ),
     (
         ('backend/llm_gateway/',),
         (),
@@ -124,6 +161,14 @@ AREA_TESTS = (
         ('tests/unit/test_parakeet_*.py',),
     ),
     (
+        MONITORING_CONTRACT_SOURCES,
+        (),
+        (
+            'tests/unit/test_monitoring_*.py',
+            'tests/unit/test_journey_observability.py',
+        ),
+    ),
+    (
         ('backend/services/users/', 'backend/routers/users'),
         (),
         (
@@ -132,6 +177,7 @@ AREA_TESTS = (
             'tests/unit/test_users_*.py',
             'tests/unit/test_delete_account_*.py',
             'tests/unit/test_claim_deletion_*.py',
+            'tests/unit/test_agent_vm_account_cleanup.py',
         ),
     ),
     (
@@ -252,6 +298,8 @@ def normalize_changed_path(path: str) -> str:
 
 
 def is_full_run_path(path: str) -> bool:
+    if path in NARROW_LOCATION_CONTEXT_PATHS:
+        return False
     if path in FULL_RUN_PATHS:
         return True
     if any(path.startswith(prefix) for prefix in FULL_RUN_PREFIXES):
@@ -262,15 +310,23 @@ def is_full_run_path(path: str) -> bool:
 def is_selectable_backend_path(path: str) -> bool:
     """Return True for backend paths that can select or force unit tests.
 
-    Docs, AGENTS, and chart/dashboard artifacts are ignored so editing them
-    does not trip the unmapped-path full-suite fallback.
+    Docs, AGENTS, and most chart/dashboard artifacts are ignored so editing them
+    does not trip the unmapped-path full-suite fallback. Monitoring telemetry
+    contract sources (#9587) are an intentional exception so inventory/values
+    drift still selects the monitoring unit contracts.
     """
     if not path.startswith('backend/'):
         return False
     if path.endswith('.md'):
         return False
-    if path.startswith('backend/docs/') or path.startswith('backend/charts/'):
+    if path.startswith('backend/docs/'):
         return False
+    if path.startswith('backend/charts/'):
+        monitoring_contract_prefixes = MONITORING_CONTRACT_SOURCES
+        return any(
+            path == prefix or path.startswith(prefix) if prefix.endswith('/') else path == prefix
+            for prefix in monitoring_contract_prefixes
+        )
     return True
 
 

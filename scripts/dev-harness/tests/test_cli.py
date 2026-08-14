@@ -14,6 +14,24 @@ from dev_harness import config, safety
 from dev_harness import cli
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+DEV_HARNESS_ROOT = REPO_ROOT / "scripts" / "dev-harness"
+
+
+def _prepend_dev_harness_pythonpath(env: dict[str, str]) -> None:
+    entries = [str(DEV_HARNESS_ROOT)]
+    if existing := env.get("PYTHONPATH"):
+        entries.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(entries)
+
+
+def test_child_pythonpath_uses_the_selected_host_separator(tmp_path: Path) -> None:
+    env = {"PYTHONPATH": str(tmp_path / "existing")}
+    first = tmp_path / "scripts" / "dev-harness"
+    second = tmp_path / "backend"
+
+    cli._prepend_pythonpath(env, first, second)
+
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(first), str(second), str(tmp_path / "existing")]
 
 
 def test_offline_check_skips_provider_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -47,11 +65,83 @@ def test_real_check_lists_provider_credentials(monkeypatch: pytest.MonkeyPatch, 
     assert any("DEEPGRAM_API_KEY" in item for item in missing)
 
 
+def test_firebase_command_writes_the_configured_emulator_ports(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("OMI_LOCAL_STATE_ROOT", str(tmp_path / "state"))
+    monkeypatch.setenv("OMI_HARNESS_PORT_OFFSET", "321")
+    cfg = config.load_config(REPO_ROOT, create_layout=True)
+    command = cli._firebase_command(cfg)
+    config_path = Path(command[command.index("--config") + 1])
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert payload["emulators"]["firestore"]["port"] == 8406
+    assert payload["emulators"]["auth"]["port"] == 9420
+
+
+def test_wait_health_returns_services_that_exhaust_their_deadlines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PROVIDER_MODE", "offline")
+    monkeypatch.setenv("OMI_LOCAL_STATE_ROOT", str(tmp_path / "state"))
+    cfg = config.load_config(REPO_ROOT)
+    ticks = iter((0.0, 181.0))
+    monkeypatch.setattr(cli.time, "time", lambda: next(ticks))
+    monkeypatch.setattr(cli, "_process_records", lambda _cfg: [])
+
+    failures = cli._wait_health(cfg)
+
+    assert failures == [
+        "firestore: not healthy after 45s at http://127.0.0.1:8085/",
+        "auth: not healthy after 90s at http://127.0.0.1:9099/",
+        "typesense: not healthy after 45s at http://127.0.0.1:8108/collections",
+        "backend: not healthy after 180s at http://127.0.0.1:8000/docs",
+        "llm-gateway: not healthy after 60s at http://127.0.0.1:9080/health",
+        "desktop-backend: not healthy after 60s at http://127.0.0.1:10201/health",
+        "redis: not healthy after 30s at 127.0.0.1:6380",
+    ]
+
+
+def test_wait_health_discards_transient_failure_after_recovery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PROVIDER_MODE", "offline")
+    monkeypatch.setenv("OMI_LOCAL_STATE_ROOT", str(tmp_path / "state"))
+    cfg = config.load_config(REPO_ROOT)
+    ticks = iter((0.0, 1.0, 2.0))
+    monkeypatch.setattr(cli.time, "time", lambda: next(ticks))
+    monkeypatch.setattr(cli.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(cli, "_process_records", lambda _cfg: [])
+    monkeypatch.setattr(cli, "_port_open", lambda _host, _port: True)
+    outcomes = iter([(False, "connection refused")] * 6 + [(True, "ok")] * 6)
+    monkeypatch.setattr(cli, "_http_ok", lambda _url, headers=None: next(outcomes))
+
+    assert cli._wait_health(cfg) == []
+
+
+def test_status_health_label_uses_http_probe_and_preserves_degraded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("PROVIDER_MODE", "offline")
+    monkeypatch.setenv("OMI_LOCAL_STATE_ROOT", str(tmp_path / "state"))
+    cfg = config.load_config(REPO_ROOT)
+
+    monkeypatch.setattr(cli, "_port_open", lambda _host, _port: True)
+    monkeypatch.setattr(cli, "_http_ok", lambda _url, headers=None: (True, "HTTP 200"))
+    assert cli._status_health_label(cfg, "backend", alive=True, port=cfg.backend_port) == "HTTP 200"
+
+    monkeypatch.setattr(cli, "_http_ok", lambda _url, headers=None: (False, "connection refused"))
+    assert (
+        cli._status_health_label(cfg, "backend", alive=True, port=cfg.backend_port)
+        == "degraded (connection refused)"
+    )
+
+    monkeypatch.setattr(cli, "_port_open", lambda _host, _port: False)
+    assert cli._status_health_label(cfg, "backend", alive=False, port=cfg.backend_port) == "port-closed"
+
+
 def test_reset_command_is_idempotent_with_temp_state(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["PROVIDER_MODE"] = "offline"
     env["OMI_LOCAL_STATE_ROOT"] = str(tmp_path / "state")
-    env["PYTHONPATH"] = f"{REPO_ROOT / 'scripts' / 'dev-harness'}:{env.get('PYTHONPATH', '')}"
+    _prepend_dev_harness_pythonpath(env)
 
     for _ in range(2):
         result = subprocess.run(
@@ -75,7 +165,7 @@ def test_status_reports_seeded_scenario_and_summary_path(tmp_path: Path) -> None
     env = os.environ.copy()
     env["PROVIDER_MODE"] = "offline"
     env["OMI_LOCAL_STATE_ROOT"] = str(tmp_path / "state")
-    env["PYTHONPATH"] = f"{REPO_ROOT / 'scripts' / 'dev-harness'}:{env.get('PYTHONPATH', '')}"
+    _prepend_dev_harness_pythonpath(env)
 
     seed = subprocess.run(
         [sys.executable, "scripts/dev-harness/seed-memory-scenario.py", "happy_path", "--dry-run"],
@@ -108,7 +198,7 @@ def test_session_summary_is_local_emulator_non_activation(tmp_path: Path) -> Non
     env = os.environ.copy()
     env["PROVIDER_MODE"] = "offline"
     env["OMI_LOCAL_STATE_ROOT"] = str(tmp_path / "state")
-    env["PYTHONPATH"] = f"{REPO_ROOT / 'scripts' / 'dev-harness'}:{env.get('PYTHONPATH', '')}"
+    _prepend_dev_harness_pythonpath(env)
 
     seed = subprocess.run(
         [sys.executable, "scripts/dev-harness/seed-memory-scenario.py", "happy_path", "--dry-run"],

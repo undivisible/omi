@@ -27,6 +27,7 @@ FORWARDED_CHAT_COMPLETION_PARAMS = frozenset(
         'max_tokens',
         'n',
         'presence_penalty',
+        'prompt_cache_options',
         'prompt_cache_key',
         'seed',
         'stop',
@@ -80,8 +81,12 @@ def _validate_messages(value: object) -> list[Mapping[str, Any]]:
         role = typed_message.get('role')
         if not isinstance(role, str) or not role:
             raise GatewayInvalidRequestError('message role is required', param=f'{param}.role')
-        if 'content' not in typed_message:
-            raise GatewayInvalidRequestError('message content is required', param=f'{param}.content')
+        content = typed_message.get('content')
+        if 'content' not in typed_message or content is None:
+            if role == 'assistant':
+                typed_message = {**dict(typed_message), 'content': ''}
+            else:
+                raise GatewayInvalidRequestError('message content is required', param=f'{param}.content')
         _validate_text_content(typed_message.get('content'), param=f'{param}.content')
         validated.append(typed_message)
     return validated
@@ -94,18 +99,38 @@ def _validate_text_content(content: object, *, param: str) -> None:
     if (
         isinstance(content, list)
         and content
-        and all(_is_text_content_part(part) for part in cast(list[object], content))
+        and all(_is_supported_content_part(part) for part in cast(list[object], content))
     ):
         return
 
-    raise GatewayCapabilityMismatchError('only text message content is supported for this lane', param=param)
+    raise GatewayCapabilityMismatchError(
+        'only text or image_url message content is supported for this lane', param=param
+    )
+
+
+def _is_supported_content_part(part: object) -> bool:
+    return _is_text_content_part(part) or _is_image_url_content_part(part)
 
 
 def _is_text_content_part(part: object) -> bool:
     if not isinstance(part, Mapping):
         return False
     typed_part = cast(Mapping[str, object], part)
-    return typed_part.get('type') == 'text' and isinstance(typed_part.get('text'), str)
+    if typed_part.get('type') != 'text' or not isinstance(typed_part.get('text'), str):
+        return False
+    if 'prompt_cache_breakpoint' in typed_part:
+        _validate_prompt_cache_breakpoint(typed_part['prompt_cache_breakpoint'])
+    return True
+
+
+def _is_image_url_content_part(part: object) -> bool:
+    if not isinstance(part, Mapping):
+        return False
+    typed_part = cast(Mapping[str, object], part)
+    if typed_part.get('type') != 'image_url':
+        return False
+    image_url = typed_part.get('image_url')
+    return isinstance(image_url, Mapping) and isinstance(cast(Mapping[str, object], image_url).get('url'), str)
 
 
 def _validate_response_format(value: object, lane: LaneConfig) -> Mapping[str, Any] | None:
@@ -158,10 +183,30 @@ def _validate_forwarded_params(request: Mapping[str, Any]) -> Mapping[str, Any]:
         )
     forwarded = {key: request[key] for key in FORWARDED_CHAT_COMPLETION_PARAMS if key in request}
     _validate_output_limit_aliases(forwarded)
+    if 'prompt_cache_options' in forwarded:
+        _validate_prompt_cache_options(forwarded['prompt_cache_options'])
     for key in ('tools', 'tool_choice', 'stream'):
         if key in request:
             forwarded[key] = request[key]
     return forwarded
+
+
+def _validate_prompt_cache_options(value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise GatewayInvalidRequestError('prompt_cache_options must be an object', param='prompt_cache_options')
+    if set(value) != {'mode', 'ttl'} or value.get('mode') != 'explicit' or value.get('ttl') != '30m':
+        raise GatewayInvalidRequestError(
+            'prompt_cache_options must be {"mode": "explicit", "ttl": "30m"}',
+            param='prompt_cache_options',
+        )
+
+
+def _validate_prompt_cache_breakpoint(value: object) -> None:
+    if not isinstance(value, Mapping) or dict(value) != {'mode': 'explicit'}:
+        raise GatewayInvalidRequestError(
+            'prompt_cache_breakpoint must be {"mode": "explicit"}',
+            param='prompt_cache_breakpoint',
+        )
 
 
 def _validate_output_limit_aliases(forwarded: Mapping[str, Any]) -> None:

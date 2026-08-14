@@ -4,6 +4,7 @@ import wave as _wave
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from io import BytesIO
+from math import ceil
 from threading import RLock
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, cast
 
@@ -16,6 +17,7 @@ from pydub import AudioSegment  # pydub is untyped
 from config.prerecorded_stt import (
     PrerecordedSTTConfigurationError as _PrerecordedSTTConfigurationError,
     PrerecordedSTTService,
+    TranscriptionOutcome,
     get_prerecorded_models,
     require_provider_environment,
 )
@@ -31,10 +33,12 @@ from config.stt_provider_policy import (
 from models.transcript_segment import TranscriptSegment
 from utils.byok import get_byok_key
 from utils.other.endpoints import timeit
+from utils.stt.outcomes import TranscriptionFailure
 from utils.stt.speaker_embedding import SPEAKER_MATCH_THRESHOLD, compare_embeddings, extract_embedding_from_bytes
 
 _DG_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
 _MODULATE_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+_MAX_PRE_RECORDED_SEGMENT_DURATION_SECONDS = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +84,8 @@ def get_prerecorded_service(language: Optional[str] = 'en') -> Tuple[str, Option
     Iterates comma-separated models (same pattern as STT_SERVICE_MODELS for streaming).
     First model allowed by the central serving policy that supports the language
     wins. Disabled-provider tokens are ignored, then policy-owned defaults provide
-    the serving fallback.
+    the serving fallback. A language no capability map claims falls through to Velma
+    rather than failing selection.
     """
     base_lang = normalized_stt_language(language) or 'en'
 
@@ -106,7 +111,13 @@ def get_prerecorded_service(language: Optional[str] = 'en') -> Tuple[str, Option
     if selected is not None:
         return selected
 
-    raise RuntimeError(f'No configured pre-recorded STT provider supports language {language!r}')
+    # Velma's batch API detects the language itself — we never send a code — so it can
+    # serve languages the capability maps omit, and values that are not codes at all.
+    if provider_is_enabled(MODULATE_PROVIDER, STTServingSurface.PRERECORDED):
+        return PrerecordedSTTService.MODULATE, 'multi', 'velma-2'
+
+    # Only reachable with every pre-recorded provider disabled, which no retry resolves.
+    raise TranscriptionFailure(TranscriptionOutcome.CONFIG_ERROR, retryable=False)
 
 
 # Lazily initialized because constructing the SDK client at import makes every
@@ -1174,21 +1185,56 @@ def _retrieve_user_speaker_id(words: List[Dict[str, Any]], skip_n_seconds: int) 
 def _merge_segments(
     words: List[Dict[str, Any]], skip_n_seconds: int, user_speaker_id: Optional[str]
 ) -> List[Dict[str, Any]]:
+    def split_long_entry(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
+        start = float(entry['start'])
+        end = float(entry['end'])
+        duration = end - start
+        if duration <= _MAX_PRE_RECORDED_SEGMENT_DURATION_SECONDS:
+            return [entry]
+
+        text_words = str(entry['text']).split()
+        if not text_words:
+            return [entry]
+
+        chunk_count = min(ceil(duration / _MAX_PRE_RECORDED_SEGMENT_DURATION_SECONDS), len(text_words))
+        chunk_duration = duration / chunk_count
+        words_per_chunk, remainder = divmod(len(text_words), chunk_count)
+        chunks: List[Dict[str, Any]] = []
+        text_offset = 0
+        for index in range(chunk_count):
+            chunk_word_count = words_per_chunk + (1 if index < remainder else 0)
+            next_text_offset = text_offset + chunk_word_count
+            chunk = dict(entry)
+            chunk['start'] = start + index * chunk_duration
+            chunk['end'] = end if index == chunk_count - 1 else start + (index + 1) * chunk_duration
+            chunk['text'] = ' '.join(text_words[text_offset:next_text_offset])
+            chunks.append(chunk)
+            text_offset = next_text_offset
+        return chunks
+
     segments: List[Dict[str, Any]] = []
     for word in words:
         if word['start'] < skip_n_seconds:
             continue
-        word['is_user'] = word['speaker'] == user_speaker_id if word['speaker'] else False
+        for entry in split_long_entry(word):
+            entry['is_user'] = entry['speaker'] == user_speaker_id if entry['speaker'] else False
 
-        same_prev_speaker = word['speaker'] == segments[-1]['speaker'] if segments else False
-        seconds_from_prev = word['start'] - segments[-1]['end'] if segments else 0
+            same_prev_speaker = entry['speaker'] == segments[-1]['speaker'] if segments else False
+            seconds_from_prev = entry['start'] - segments[-1]['end'] if segments else 0
 
-        # TODO: consider having a max segment size too
-        if segments and same_prev_speaker and seconds_from_prev < 30:
-            segments[-1]['end'] = word['end']
-            segments[-1]['text'] += ' ' + word['text']
-        else:
-            segments.append(word)
+            within_max_duration = (
+                entry['end'] - segments[-1]['start'] < _MAX_PRE_RECORDED_SEGMENT_DURATION_SECONDS if segments else False
+            )
+            if (
+                segments
+                and same_prev_speaker
+                and seconds_from_prev < _MAX_PRE_RECORDED_SEGMENT_DURATION_SECONDS
+                and within_max_duration
+            ):
+                segments[-1]['end'] = entry['end']
+                segments[-1]['text'] += ' ' + entry['text']
+            else:
+                segments.append(entry)
     return segments
 
 

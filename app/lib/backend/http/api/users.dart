@@ -321,6 +321,27 @@ Future<bool> getHasConversationSummaryRating(String conversationId) async {
 }
 
 // User language preference API calls
+
+/// Picker options as name -> code, in server order. Null on any failure.
+Future<Map<String, String>?> getAvailableLanguages() async {
+  var response = await makeApiCall(
+    url: '${Env.apiBaseUrl}v1/users/available-languages',
+    headers: {},
+    method: 'GET',
+    body: '',
+  );
+  if (response == null || response.statusCode != 200) return null;
+
+  try {
+    final parsed = wire.GeneratedAvailableLanguagesResponse.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    if (parsed.languages.isEmpty) return null;
+    return {for (final language in parsed.languages) language.name: language.code};
+  } catch (e) {
+    Logger.debug('Error parsing getAvailableLanguages response: $e');
+    return null;
+  }
+}
+
 Future<String?> getUserPrimaryLanguage() async {
   var response = await makeApiCall(url: '${Env.apiBaseUrl}v1/users/language', headers: {}, method: 'GET', body: '');
   if (response == null) return null;
@@ -339,18 +360,22 @@ Future<String?> getUserPrimaryLanguage() async {
   }
 }
 
-Future<bool> setUserPrimaryLanguage(String languageCode) async {
+/// Returns the server-decided `single_language_mode` on success, null on
+/// failure. The server derives eligibility from the live STT capability
+/// policy (#10022) — clients must not re-decide it locally.
+Future<bool?> setUserPrimaryLanguage(String languageCode) async {
   var response = await makeApiCall(
     url: '${Env.apiBaseUrl}v1/users/language',
     headers: {},
     method: 'PATCH',
     body: jsonEncode({'language': languageCode}),
   );
-  if (response == null) return false;
+  if (response == null) return null;
   Logger.debug('setUserPrimaryLanguage response: ${response.body}');
-  if (response.statusCode != 200) return false;
+  if (response.statusCode != 200) return null;
   final data = wire.GeneratedUserLanguageUpdateResponse.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
-  return data.status == 'ok';
+  if (data.status != 'ok') return null;
+  return data.singleLanguageMode;
 }
 
 Future<bool> setPreferredSummarizationAppServer(String appId) async {

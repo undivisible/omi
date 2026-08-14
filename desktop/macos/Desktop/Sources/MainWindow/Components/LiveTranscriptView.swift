@@ -18,14 +18,14 @@ struct LiveTranscriptPanel: View {
       VStack(spacing: OmiSpacing.lg) {
         Image(systemName: "waveform")
           .scaledFont(size: 48)
-          .foregroundColor(OmiColors.textTertiary)
+          .foregroundColor(Ink.secondary)
           .opacity(0.5)
         Text("Live Transcript")
           .scaledFont(size: OmiType.subheading, weight: .medium)
-          .foregroundColor(OmiColors.textSecondary)
+          .foregroundColor(Ink.secondary)
         Text("Start speaking and your transcript will appear here")
           .scaledFont(size: OmiType.body)
-          .foregroundColor(OmiColors.textTertiary)
+          .foregroundColor(Ink.secondary)
           .multilineTextAlignment(.center)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -50,7 +50,7 @@ struct RecordingBarAudioLevels: View {
       HStack(spacing: OmiSpacing.xs) {
         Image(systemName: "mic.fill")
           .scaledFont(size: OmiType.caption)
-          .foregroundColor(OmiColors.textTertiary)
+          .foregroundColor(Ink.secondary)
         AudioLevelWaveformView(
           level: monitor.microphoneLevel,
           barCount: 8,
@@ -61,7 +61,7 @@ struct RecordingBarAudioLevels: View {
       HStack(spacing: OmiSpacing.xs) {
         Image(systemName: "speaker.wave.2.fill")
           .scaledFont(size: OmiType.caption)
-          .foregroundColor(OmiColors.textTertiary)
+          .foregroundColor(Ink.secondary)
         AudioLevelWaveformView(
           level: monitor.systemLevel,
           barCount: 8,
@@ -80,7 +80,7 @@ struct RecordingBarDuration: View {
   var body: some View {
     Text(timer.formattedDuration)
       .scaledFont(size: OmiType.body, weight: .medium, design: .monospaced)
-      .foregroundColor(OmiColors.textSecondary)
+      .foregroundColor(Ink.secondary)
   }
 }
 
@@ -93,15 +93,164 @@ struct RecordingBarTranscriptText: View {
     if let latestText = monitor.latestText, !monitor.isEmpty {
       Text(latestText)
         .scaledFont(size: OmiType.body)
-        .foregroundColor(OmiColors.textSecondary)
+        .foregroundColor(Ink.secondary)
         .lineLimit(1)
         .truncationMode(.head)
         .frame(maxWidth: 260, alignment: .leading)
     } else {
       Text("Listening")
         .scaledFont(size: OmiType.body, weight: .medium)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
     }
+  }
+}
+
+/// Live transcript card shown at the top of Conversations while recording —
+/// updates in real time as speech is transcribed. Observes the monitor directly
+/// so the surrounding page doesn't re-render on every segment.
+///
+/// Clicking anywhere on the card invokes `onExpand`, letting the parent present
+/// a full-screen view of the live transcript.
+struct ConversationsLiveTranscript: View {
+  @ObservedObject private var monitor = LiveTranscriptMonitor.shared
+
+  /// Invoked when the user clicks the card. When non-nil, the card shows an
+  /// expand affordance and the whole surface becomes tappable.
+  var onExpand: (() -> Void)? = nil
+
+  @State private var isHovered = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: OmiSpacing.sm) {
+      HStack(spacing: OmiSpacing.xs) {
+        Circle().fill(Ink.errorRed).frame(width: 7, height: 7)
+        Text("Live").scaledFont(size: OmiType.caption, weight: .semibold)
+          .foregroundColor(Ink.secondary)
+        Spacer()
+        if onExpand != nil {
+          Image(systemName: "arrow.up.left.and.arrow.down.right")
+            .scaledFont(size: OmiType.caption)
+            .foregroundColor(isHovered ? Ink.primary : Ink.secondary)
+        }
+      }
+      if monitor.isEmpty {
+        Text("Listening…").scaledFont(size: OmiType.body).foregroundColor(Ink.secondary)
+          .padding(.vertical, OmiSpacing.sm)
+      } else {
+        LiveTranscriptView(segments: monitor.segments)
+          .frame(maxHeight: 220)
+          // Let clicks fall through to the card's expand tap rather than being
+          // captured by the inner scroll / text selection.
+          .allowsHitTesting(false)
+      }
+    }
+    .padding(OmiSpacing.lg)
+    .background(
+      RoundedRectangle(cornerRadius: OmiChrome.cardRadius, style: .continuous)
+        .fill(Ink.rowFill)
+        .overlay(
+          RoundedRectangle(cornerRadius: OmiChrome.cardRadius, style: .continuous)
+            .stroke(
+              Ink.separator.opacity(onExpand != nil && isHovered ? 0.55 : 0.3), lineWidth: 1))
+    )
+    .contentShape(RoundedRectangle(cornerRadius: OmiChrome.cardRadius, style: .continuous))
+    .modifier(LiveTranscriptExpandTap(onExpand: onExpand, isHovered: $isHovered))
+  }
+}
+
+/// Adds the click-to-expand behavior only when an `onExpand` handler is present,
+/// so the card stays inert (no pointer cursor, no tap) when expansion is
+/// unavailable.
+private struct LiveTranscriptExpandTap: ViewModifier {
+  let onExpand: (() -> Void)?
+  @Binding var isHovered: Bool
+
+  /// Tracks whether we currently hold a pushed cursor so push/pop stay balanced
+  /// and the pointing-hand cursor is always popped when the card stops being
+  /// hovered — SwiftUI doesn't deliver an `onHover(false)` when the view leaves
+  /// the hierarchy. Two exit paths are handled explicitly: `onDisappear`
+  /// (capture pauses and the `if appState.isLiveCapturing` card is removed) and
+  /// the tap handler (expanding replaces the page, which also unmounts the card;
+  /// popping here keeps the cursor from lingering for a frame).
+  @State private var didPushCursor = false
+
+  private func setHovered(_ hovering: Bool) {
+    isHovered = hovering
+    if hovering, !didPushCursor {
+      NSCursor.pointingHand.push()
+      didPushCursor = true
+    } else if !hovering, didPushCursor {
+      NSCursor.pop()
+      didPushCursor = false
+    }
+  }
+
+  func body(content: Content) -> some View {
+    if let onExpand {
+      content
+        .onTapGesture {
+          // Pop the pointing-hand before the page swaps away the card.
+          setHovered(false)
+          onExpand()
+        }
+        .onHover { setHovered($0) }
+        .onDisappear { setHovered(false) }
+        .help("Expand live transcript")
+    } else {
+      content
+    }
+  }
+}
+
+/// Full-panel live transcript, presented in place of the Conversations list when
+/// the user expands the compact live card. Observes the monitor directly so it
+/// keeps updating live. Hosted on the same glass panel — paints no ground of its own.
+struct ConversationsLiveTranscriptFullScreen: View {
+  @ObservedObject private var monitor = LiveTranscriptMonitor.shared
+  var onCollapse: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: OmiSpacing.sm) {
+        Circle().fill(Ink.errorRed).frame(width: 8, height: 8)
+        Text("Live Transcript")
+          .scaledFont(size: OmiType.subheading, weight: .semibold)
+          .foregroundColor(Ink.primary)
+        Spacer()
+        Button(action: onCollapse) {
+          Image(systemName: "arrow.down.right.and.arrow.up.left")
+            .scaledFont(size: OmiType.body)
+            .foregroundColor(Ink.secondary)
+            .padding(OmiSpacing.sm)
+            .glassChip()
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.escape, modifiers: [])
+        .help("Collapse")
+      }
+      .padding(.horizontal, OmiSpacing.xxl)
+      .padding(.top, OmiSpacing.lg)
+      .padding(.bottom, OmiSpacing.md)
+
+      Divider().overlay(Ink.separator.opacity(0.3))
+
+      if monitor.isEmpty {
+        VStack(spacing: OmiSpacing.md) {
+          Image(systemName: "waveform")
+            .scaledFont(size: 48)
+            .foregroundColor(Ink.secondary)
+            .opacity(0.5)
+          Text("Listening…")
+            .scaledFont(size: OmiType.body)
+            .foregroundColor(Ink.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        LiveTranscriptView(segments: monitor.segments)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }
 
@@ -173,7 +322,7 @@ private struct LiveSegmentView: View {
   }
 
   private var bubbleColor: Color {
-    isUser ? OmiColors.accent.opacity(0.3) : OmiColors.backgroundTertiary
+    isUser ? PageGlass.speakerTints[0] : Ink.rowFillHover
   }
 
   var body: some View {
@@ -203,12 +352,12 @@ private struct LiveSegmentView: View {
             HStack(spacing: OmiSpacing.xxs) {
               Text(speakerLabel)
                 .scaledFont(size: OmiType.caption, weight: personName != nil ? .semibold : .medium)
-                .foregroundColor(personName != nil ? OmiColors.accent : OmiColors.textTertiary)
+                .foregroundColor(personName != nil ? Ink.primary : Ink.secondary)
 
               if personName == nil {
                 Image(systemName: "pencil")
                   .scaledFont(size: OmiType.micro)
-                  .foregroundColor(OmiColors.textQuaternary)
+                  .foregroundColor(Ink.secondary)
                   .opacity(isHovered ? 1 : 0)
               }
             }
@@ -225,12 +374,12 @@ private struct LiveSegmentView: View {
         } else {
           Text(speakerLabel)
             .scaledFont(size: OmiType.caption, weight: .medium)
-            .foregroundColor(OmiColors.textTertiary)
+            .foregroundColor(Ink.secondary)
         }
 
         Text(formatTime(segment.start))
           .scaledFont(size: OmiType.caption)
-          .foregroundColor(OmiColors.textQuaternary)
+          .foregroundColor(Ink.secondary)
 
         if isUser {
           speakerAvatar
@@ -240,7 +389,7 @@ private struct LiveSegmentView: View {
       // Message bubble
       Text(segment.text)
         .scaledFont(size: OmiType.body)
-        .foregroundColor(OmiColors.textPrimary)
+        .foregroundColor(Ink.primary)
         .textSelection(.enabled)
         .padding(.horizontal, OmiSpacing.md)
         .padding(.vertical, OmiSpacing.sm)
@@ -254,7 +403,7 @@ private struct LiveSegmentView: View {
         ForEach(segment.translations, id: \.lang) { translation in
           Text(translation.text)
             .scaledFont(size: OmiType.body)
-            .foregroundColor(OmiColors.textSecondary)
+            .foregroundColor(Ink.secondary)
             .italic()
             .textSelection(.enabled)
             .padding(.horizontal, OmiSpacing.md)
@@ -270,14 +419,12 @@ private struct LiveSegmentView: View {
 
   private var speakerAvatar: some View {
     Circle()
-      .fill(
-        isUser ? OmiColors.accent : (personName != nil ? OmiColors.accent.opacity(0.6) : OmiColors.backgroundQuaternary)
-      )
+      .fill(isUser ? Ink.primary : Ink.rowFillHover)
       .frame(width: 24, height: 24)
       .overlay(
         Text(isUser ? "Y" : (personName?.prefix(1).uppercased() ?? String(segment.speaker)))
           .scaledFont(size: OmiType.caption, weight: .medium)
-          .foregroundColor(OmiColors.textPrimary)
+          .foregroundColor(isUser ? Ink.surface : Ink.primary)
       )
   }
 }
@@ -293,6 +440,6 @@ private struct LiveSegmentView: View {
       SpeakerSegment(speaker: 1, text: "Sure, I'd love to hear more about it.", start: 10.5, end: 12.0),
     ])
     .frame(width: 400, height: 300)
-    .background(OmiColors.backgroundSecondary)
+    .background(Ink.rowFill)
   }
 #endif

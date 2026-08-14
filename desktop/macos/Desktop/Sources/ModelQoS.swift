@@ -40,9 +40,6 @@ struct ModelQoS {
     /// Floating bar responses
     static var floatingBar: String { "claude-sonnet-4-6" }
 
-    /// Synthesis extraction tasks (calendar, gmail, notes, memory import)
-    static var synthesis: String { "claude-haiku-4-5-20251001" }
-
     /// ChatLab test queries
     static var chatLabQuery: String { "claude-sonnet-4-20250514" }
 
@@ -88,16 +85,37 @@ struct ModelQoS {
       }
     }
 
-    /// Insight generation
-    static var insight: String {
+    /// Insight generation.
+    ///
+    /// Pro on both tiers, deliberately. Insight ran on `gemini-pro-latest` for everyone until
+    /// this dropped to Flash at the premium tier, and the click-through fell with it: 2.34%
+    /// in the week of 2026-04-12 (39.8k sent, 336 distinct clickers) against 0.7–0.96%
+    /// through July. Unlike the other proactive assistants this one is cheap to run well —
+    /// a 10-minute timer caps it at ~6 analyses/hour no matter how much the user switches
+    /// windows — and its whole job is finding the one non-obvious thing, which is exactly
+    /// where the weaker model stops earning its interruption.
+    static var insight: String { "gemini-2.5-pro" }
+
+    /// Live notch suggestions.
+    ///
+    /// Deliberately a tier below the other proactive assistants. This one is triggered by
+    /// ordinary context changes rather than a slow timer, so its call volume is an order of
+    /// magnitude higher; the work — "does this screen plus what Omi already knows justify
+    /// one short sentence?" — is well within Flash-Lite. Cost, not capability, sets this.
+    static var suggestions: String {
       switch activeTier {
-      case .premium: return "gemini-2.5-flash"
-      case .max: return "gemini-2.5-pro"
+      case .premium: return "gemini-2.5-flash-lite"
+      case .max: return "gemini-2.5-flash"
       }
     }
 
     /// Embeddings (not tier-dependent, kept separate)
     static var embedding: String { "gemini-embedding-001" }
+  }
+
+  struct Proactivity {
+    static let extractionOperation = "proactive_extraction"
+    static let reasoningOperation = "proactive_reasoning"
   }
 
   // MARK: - Tier Info (for UI / debugging)

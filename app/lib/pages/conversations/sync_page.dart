@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'package:omi/backend/preferences.dart';
 import 'package:omi/models/sync_state.dart';
+import 'package:omi/pages/conversations/sync_cooldown_copy.dart';
 import 'package:omi/providers/connectivity_provider.dart';
 import 'package:omi/providers/sync_provider.dart';
 import 'package:omi/providers/user_provider.dart';
@@ -74,6 +75,8 @@ class WalListItem extends StatelessWidget {
         return (Colors.redAccent, l.syncStatusFailed);
       case WalSyncDisplayState.corrupted:
         return (Colors.redAccent, l.syncStatusFileUnavailable);
+      case WalSyncDisplayState.outsideRecoveryWindow:
+        return (Colors.redAccent, l.syncStatusTooOld);
       case WalSyncDisplayState.waiting:
       case WalSyncDisplayState.syncing:
         return (Colors.grey.shade500, l.syncStatusWaiting);
@@ -118,7 +121,8 @@ class WalListItem extends StatelessWidget {
         final timeStr = dateTimeFormat('h:mm a', DateTime.fromMillisecondsSinceEpoch(wal.timerStart * 1000));
         final duration = secondsToHumanReadable(wal.seconds, context);
         final source = _sourceLabel(context);
-        final showBar = displayState == WalSyncDisplayState.syncing &&
+        final showBar =
+            displayState == WalSyncDisplayState.syncing &&
             wal.status != WalStatus.synced &&
             wal.syncStartedAt != null &&
             wal.storage != WalStorage.flashPage;
@@ -128,8 +132,9 @@ class WalListItem extends StatelessWidget {
           decoration: BoxDecoration(color: const Color(0xFF1C1C1E), borderRadius: BorderRadius.circular(16)),
           child: Dismissible(
             key: Key(wal.id),
-            direction:
-                displayState == WalSyncDisplayState.syncing ? DismissDirection.none : DismissDirection.endToStart,
+            direction: displayState == WalSyncDisplayState.syncing
+                ? DismissDirection.none
+                : DismissDirection.endToStart,
             confirmDismiss: (direction) {
               final uploading = wal.syncDisplayState == WalSyncDisplayState.uploaded;
               return OmiConfirmDialog.show(
@@ -437,6 +442,9 @@ class _SyncPageState extends State<SyncPage> {
   }
 
   String _formatErrorMessage(BuildContext context, String errorMessage) {
+    if (SyncProvider.isPendingUploadError(errorMessage)) {
+      return context.l10n.syncStatusFailed;
+    }
     if (errorMessage.startsWith('Exception: ')) {
       errorMessage = errorMessage.substring('Exception: '.length);
     }
@@ -534,15 +542,12 @@ class _SyncPageState extends State<SyncPage> {
           break;
       }
     } else if (syncProvider.isRateLimited) {
-      title = switch (syncProvider.rateLimitReason) {
-        RateLimitReason.backendBusy => l.syncCardBackendBusy,
-        RateLimitReason.backfillPaced => l.syncCardReadyCount(readyToSync),
-        _ => l.syncCardRateLimited,
-      };
+      title = syncCooldownTitle(syncProvider.rateLimitReason, l);
       titleColor = Colors.orangeAccent;
     } else if (uploaded > 0) {
       title = l.syncCardProcessing;
-      subtitle = '${l.syncCardProgressOf(uploaded, uploaded + readyToSync)} · ${l.syncProcessingBackgroundHint}';
+      // Uploaded WAL counts are queue state, not server segment progress.
+      subtitle = l.syncProcessingBackgroundHint;
     } else if (readyToSync > 0) {
       title = l.syncCardReadyCount(readyToSync);
       action = _statusActionPill(l.sync, Colors.deepPurpleAccent, () {
@@ -638,7 +643,7 @@ class _SyncPageState extends State<SyncPage> {
       ),
       child: Row(
         children: [
-          FaIcon(FontAwesomeIcons.circleExclamation, color: Colors.redAccent, size: 16),
+          const FaIcon(FontAwesomeIcons.circleExclamation, color: Colors.redAccent, size: 16),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -709,22 +714,22 @@ class _SyncPageState extends State<SyncPage> {
             isPending
                 ? FontAwesomeIcons.circleCheck
                 : isCorrupted
-                    ? FontAwesomeIcons.triangleExclamation
-                    : FontAwesomeIcons.clockRotateLeft,
+                ? FontAwesomeIcons.triangleExclamation
+                : FontAwesomeIcons.clockRotateLeft,
             size: 24,
             color: isPending
                 ? Colors.green
                 : isCorrupted
-                    ? Colors.redAccent
-                    : Colors.grey,
+                ? Colors.redAccent
+                : Colors.grey,
           ),
           const SizedBox(height: 16),
           Text(
             isPending
                 ? context.l10n.noPendingRecordings
                 : isCorrupted
-                    ? context.l10n.syncStatusFileUnavailable
-                    : context.l10n.noProcessedRecordings,
+                ? context.l10n.syncStatusFileUnavailable
+                : context.l10n.noProcessedRecordings,
             style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
           ),
           if (isPending) ...[
@@ -853,7 +858,7 @@ class _SyncPageState extends State<SyncPage> {
               backgroundColor: const Color(0xFF0D0D0D),
               elevation: 0,
               leading: IconButton(
-                icon: Padding(
+                icon: const Padding(
                   padding: EdgeInsets.only(left: 2, top: 1),
                   child: FaIcon(FontAwesomeIcons.chevronLeft, size: 18),
                 ),
@@ -1056,16 +1061,9 @@ class _PendingListItem {
   final int? count;
   final Wal? wal;
 
-  _PendingListItem.header(this.label, this.icon, this.color, this.count)
-      : isHeader = true,
-        wal = null;
+  _PendingListItem.header(this.label, this.icon, this.color, this.count) : isHeader = true, wal = null;
 
-  _PendingListItem.wal(this.wal)
-      : isHeader = false,
-        label = null,
-        icon = null,
-        color = null,
-        count = null;
+  _PendingListItem.wal(this.wal) : isHeader = false, label = null, icon = null, color = null, count = null;
 }
 
 class _ManageStorageSheet extends StatelessWidget {

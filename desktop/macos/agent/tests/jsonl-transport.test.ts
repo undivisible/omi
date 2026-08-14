@@ -58,6 +58,7 @@ function query(sessionId: string, overrides: Partial<QueryMessage> = {}): QueryM
     clientId: "client-1",
     ownerId: "owner",
     sessionId,
+    surfaceKind: "main_chat",
     prompt: "hello",
     mode: "act",
     ...overrides,
@@ -120,6 +121,9 @@ describe("JsonlTransport kernel-owned query contract", () => {
       ownerId: session.ownerId,
     });
     expect(sent.at(-1)).toMatchObject({ type: "cancel_ack", accepted: false });
+    // The transport owns the correlated terminal result; the surface then
+    // accepts/discards final visible material through journal_terminalize_turn.
+    // Until that acknowledgement, the row must remain bound and streaming.
     expect(store.getRow(
       "SELECT producing_run_id, producing_attempt_id FROM conversation_turns WHERE turn_id = ?",
       ["turn-admitted-r1"],
@@ -402,6 +406,69 @@ describe("JsonlTransport kernel-owned query contract", () => {
     }
   });
 
+  it("emits one authoritative failed result when an adapter reports an error before throwing", async () => {
+    const { store, adapter, session, sent, transport } = fixture();
+    const conversationId = "conv-adapter-error-terminal";
+    store.insertSurfaceConversation({
+      ownerId: session.ownerId,
+      surfaceKind: "main_chat",
+      externalRefKind: "chat",
+      externalRefId: "default",
+      conversationId,
+      agentSessionId: session.sessionId,
+      createdAtMs: 1,
+      lastActiveAtMs: 1,
+    });
+    recordJournalTurn(store, {
+      ownerId: session.ownerId,
+      conversationId,
+      turnId: "turn-adapter-error-terminal",
+      role: "assistant",
+      surfaceKind: "main_chat",
+      origin: "typed_chat",
+      status: "streaming",
+      content: "Working",
+      contentBlocks: [],
+      createdAtMs: 2,
+    });
+    adapter.eventBeforeExecutionError = {
+      type: "error",
+      message: "adapter exploded",
+    };
+    adapter.failNextExecutionError = new Error("adapter exploded");
+
+    await transport.handleQuery(query(session.sessionId, {
+      requestId: "request-adapter-error-terminal",
+      producingTurnId: "turn-adapter-error-terminal",
+    }));
+
+    const terminalMessages = sent.filter(
+      (message) => message.type === "result" || message.type === "error",
+    );
+    expect(terminalMessages).toHaveLength(1);
+    expect(terminalMessages[0]).toMatchObject({
+      type: "result",
+      requestId: "request-adapter-error-terminal",
+      clientId: "client-1",
+      runId: expect.stringMatching(/^run_/),
+      attemptId: expect.stringMatching(/^att_/),
+      terminalStatus: "failed",
+      failure: {
+        code: expect.stringMatching(/^[a-z0-9_.:-]{1,64}$/i),
+        userMessage: "adapter exploded",
+      },
+    });
+    expect(store.getRow(
+      "SELECT producing_run_id, producing_attempt_id, status FROM conversation_turns WHERE turn_id = ?",
+      ["turn-adapter-error-terminal"],
+    )).toMatchObject({
+      producing_run_id: (terminalMessages[0] as { runId?: string }).runId,
+      producing_attempt_id: (terminalMessages[0] as { attemptId?: string }).attemptId,
+      status: "streaming",
+    });
+    store.close();
+  });
+
   it("fails and discards an admitted producing turn when an unexpected post-bind step throws", async () => {
     const { store, adapter, kernel, session, sent, transport } = fixture();
     const conversationId = "conv-query-post-bind-failure";
@@ -499,13 +566,60 @@ describe("JsonlTransport kernel-owned query contract", () => {
     expect(adapter.executed).toHaveLength(0);
 
     for (const field of [
-      "runId", "attemptId", "eventId", "surfaceKind", "surfaceContextJson", "systemPrompt", "cwd", "model",
+      "runId", "attemptId", "eventId", "surfaceContextJson", "systemPrompt", "cwd", "model",
     ] as const) {
       await expect(transport.handleQuery({
         ...query(session.sessionId),
         [field]: "forged",
       } as unknown as QueryMessage)).rejects.toThrow(`query_wire_field_not_allowed:${field}`);
     }
+    store.close();
+  });
+
+  it("projects an authorized aliased surface instead of the session's legacy surface", async () => {
+    const { store, adapter, kernel, session, transport } = fixture();
+    store.execute("UPDATE sessions SET surface_kind = ? WHERE session_id = ?", ["floating_chat", session.sessionId]);
+    store.insertSurfaceConversation({
+      ownerId: session.ownerId,
+      surfaceKind: "main_chat",
+      externalRefKind: "chat",
+      externalRefId: "main-default",
+      conversationId: "conv-aliased-main",
+      agentSessionId: session.sessionId,
+      createdAtMs: 1,
+      lastActiveAtMs: 1,
+    });
+    const admitted = kernel.contextSnapshot(session.sessionId, session.ownerId, "main_chat");
+
+    await transport.handleQuery(query(session.sessionId, {
+      requestId: "aliased-main-query",
+      surfaceKind: "main_chat",
+      expectedContextSnapshotVersion: admitted.version,
+      expectedContextSnapshotGeneration: admitted.snapshotGeneration,
+      expectedContextRendererFingerprint: admitted.rendererFingerprint,
+      expectedCapabilityVersion: admitted.capabilityVersion,
+    }));
+
+    expect(adapter.executed).toHaveLength(1);
+    const input = JSON.parse(String(store.getRow(
+      "SELECT input_json FROM runs WHERE request_id = ?",
+      ["aliased-main-query"],
+    ).input_json));
+    expect(store.getRow(
+      "SELECT surface_kind FROM sessions WHERE session_id = ?",
+      [session.sessionId],
+    ).surface_kind).toBe("floating_chat");
+    expect(input.contextRendererFingerprint).toBe(admitted.rendererFingerprint);
+    expect(input.admittedContextSnapshot.rendererFingerprint).toBe(admitted.rendererFingerprint);
+    store.close();
+  });
+
+  it("rejects a query surface that is not bound to the canonical session", async () => {
+    const { store, adapter, session, transport } = fixture();
+    await expect(transport.handleQuery(query(session.sessionId, {
+      surfaceKind: "task_chat",
+    }))).rejects.toThrow("Context projection surface is not bound to the canonical session");
+    expect(adapter.executed).toHaveLength(0);
     store.close();
   });
 

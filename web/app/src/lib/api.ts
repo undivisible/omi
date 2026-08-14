@@ -266,6 +266,33 @@ export async function processInProgressConversation(): Promise<CreateConversatio
   }
 }
 
+/**
+ * Finalize exactly one conversation by ID (desktop-style).
+ * Prefer this over processInProgressConversation when a socket owns a
+ * conversation_id — the Redis in_progress pointer is shared across device +
+ * web and must not steal a pendant session (#5388).
+ */
+export async function finalizeConversationById(
+  conversationId: string,
+): Promise<CreateConversationResponse | null> {
+  try {
+    const result = await fetchWithAuth<CreateConversationResponse>(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/finalize`,
+      {
+        method: 'POST',
+        body: JSON.stringify({}),
+      },
+    );
+    invalidateCache(invalidationPatterns.conversations);
+    return result;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('404')) {
+      return null;
+    }
+    throw error;
+  }
+}
+
 // ============================================================================
 // Action Items (Tasks) API
 // ============================================================================
@@ -448,6 +475,18 @@ export async function updateMemoryVisibility(
 export async function deleteMemory(id: string): Promise<void> {
   await fetchWithAuth(`/v3/memories/${id}`, {
     method: 'DELETE',
+  });
+  invalidateCache(invalidationPatterns.memories);
+}
+
+/**
+ * Delete multiple memories in a single batch request (up to 100 per call).
+ * Replaces N concurrent DELETE /v3/memories/{id} calls that triggered 429 rate limits.
+ */
+export async function deleteMemoriesBatch(ids: string[]): Promise<void> {
+  await fetchWithAuth(`/v3/memories/batch`, {
+    method: 'DELETE',
+    body: JSON.stringify({ memory_ids: ids }),
   });
   invalidateCache(invalidationPatterns.memories);
 }
@@ -1849,7 +1888,6 @@ const INTEGRATION_DEFINITIONS: Array<{
     name: 'Gmail',
     description: 'Email integrations',
     logo: '/integrations/gmail-logo.jpeg',
-    coming_soon: true,
   },
 ];
 

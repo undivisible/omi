@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 
 @testable import Omi_Computer
@@ -39,41 +41,91 @@ final class ChatTimelineContinuityTests: XCTestCase {
     XCTAssertEqual(messages[3].contentBlocks.spawnedAgentIDs, [subagentID])
   }
 
-  func testMainChatKeepsCompletedNonAgentToolLogsAndAgentLinks() {
+  func testCompletedToolLogsAndAgentLinksAreLiveOnlyKeepingAssistantText() {
     let subagentID = UUID()
-    let groups = ContentBlockGroup.visibleChatGroups(
-      [
-        .text(id: "text_1", text: "I started a background agent for that."),
-        .toolCall(
-          id: "tool_1",
-          name: "search_conversations",
-          status: .completed,
-          input: ToolCallInput(summary: "designer", details: "query=designer"),
-          output: "raw search output"
-        ),
-        .toolCall(
-          id: "tool_2",
-          name: "spawn_agent",
-          status: .completed,
-          input: ToolCallInput(summary: "Sleep Agent", details: "sleep five seconds"),
-          output: "Started agent\nID: \(subagentID.uuidString)"
-        ),
-        .thinking(id: "thinking_1", text: "hidden after completion"),
-      ],
-      isStreaming: false
-    )
+    let blocks: [ChatContentBlock] = [
+      .text(id: "text_1", text: "I started a background agent for that."),
+      .toolCall(
+        id: "tool_1",
+        name: "search_conversations",
+        status: .completed,
+        input: ToolCallInput(summary: "designer", details: "query=designer"),
+        output: "raw search output"
+      ),
+      .toolCall(
+        id: "tool_2",
+        name: "spawn_agent",
+        status: .completed,
+        input: ToolCallInput(summary: "Sleep Agent", details: "sleep five seconds"),
+        output: "Started agent\nID: \(subagentID.uuidString)"
+      ),
+      .thinking(id: "thinking_1", text: "hidden after completion"),
+    ]
 
-    XCTAssertEqual(groups.count, 2)
-    guard case .text(_, let text) = groups[0] else {
-      return XCTFail("expected final assistant text to remain visible")
+    // While streaming, the tool logs + spawned-agent link are live progress.
+    let streaming = ContentBlockGroup.visibleChatGroups(blocks, isStreaming: true)
+    guard let toolGroup = streaming.first(where: isToolCalls),
+      case .toolCalls(_, let calls) = toolGroup
+    else {
+      return XCTFail("expected the tool-progress group while streaming")
     }
-    XCTAssertEqual(text, "I started a background agent for that.")
-    guard case .toolCalls(_, let calls) = groups[1] else {
-      return XCTFail("expected a spawned-agent link group")
-    }
-    XCTAssertEqual(calls.count, 2)
     XCTAssertEqual(calls.map(\.id), ["tool_1", "tool_2"])
     XCTAssertEqual(calls.spawnedAgentIDs, [subagentID])
+
+    // Tool chips are live-only: once the reply settles they are dropped and only
+    // the assistant text remains.
+    let settled = ContentBlockGroup.visibleChatGroups(blocks, isStreaming: false)
+    XCTAssertEqual(settled.count, 1)
+    guard case .text(_, let text) = settled[0] else {
+      return XCTFail("expected only the final assistant text to remain")
+    }
+    XCTAssertEqual(text, "I started a background agent for that.")
+    XCTAssertFalse(settled.contains(where: isToolCalls))
+  }
+
+  func testCopyableTextIncludesOnlyFinalAssistantOutput() {
+    let message = ChatMessage(
+      text: "Fallback answer",
+      sender: .ai,
+      contentBlocks: [
+        .thinking(id: "thinking_1", text: "Internal reasoning"),
+        .toolCall(id: "tool_1", name: "search", status: .completed, output: "Raw tool result"),
+        .text(id: "answer_1", text: "Visible final answer"),
+        .agentCompletion(
+          id: "agent_1",
+          pillId: nil,
+          sessionId: nil,
+          runId: nil,
+          title: "Background agent",
+          promptSnippet: "Internal agent prompt",
+          output: "Agent-only result",
+          status: "completed"
+        ),
+      ]
+    )
+
+    XCTAssertEqual(message.copyableText, "Visible final answer")
+  }
+
+  func testFloatingResponseCopiesTheSharedFinalOutputProjection() throws {
+    let root = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    // omi-test-quality: source-inspection -- static contract: floating copy controls use ChatMessage.copyableText.
+    let source = try String(
+      contentsOf: root.appendingPathComponent("Sources/FloatingControlBar/AIResponseView.swift"),
+      encoding: .utf8
+    )
+
+    XCTAssertTrue(source.contains("let finalOutput = message.copyableText"))
+    XCTAssertTrue(source.contains("A: \\(finalOutput)"))
+    XCTAssertTrue(source.contains("Button(action: { [finalOutput] in copyText(finalOutput) })"))
+    XCTAssertFalse(source.contains("setString(message.text, forType: .string)"))
+  }
+
+  private func isToolCalls(_ group: ContentBlockGroup) -> Bool {
+    if case .toolCalls = group { return true }
+    return false
   }
 
   func testLifecycleProjectionHidesDuplicateSpawnProseAndRetainsCanonicalRunIdentity() {
@@ -243,65 +295,68 @@ final class ChatTimelineContinuityTests: XCTestCase {
     XCTAssertFalse(projected[0].text.localizedCaseInsensitiveContains(lowercasedPillID))
   }
 
-  func testMainChatKeepsCompletedAndInFlightNonAgentToolsAfterAssistantTextSettles() {
-    let groups = ContentBlockGroup.visibleChatGroups(
-      [
-        .toolCall(id: "tool_1", name: "search_conversations", status: .completed, output: "done"),
-        .toolCall(id: "tool_2", name: "execute_sql", status: .running, output: nil),
-      ],
-      // A tool can still be executing after an assistant's explanatory text
-      // has settled. Both chat surfaces must keep the truthful active row.
-      isStreaming: false
-    )
+  func testCompletedAndInFlightToolsAreLiveOnlyAfterAssistantTextSettles() {
+    let blocks: [ChatContentBlock] = [
+      .toolCall(id: "tool_1", name: "search_conversations", status: .completed, output: "done"),
+      .toolCall(id: "tool_2", name: "execute_sql", status: .running, output: nil),
+    ]
 
-    XCTAssertEqual(groups.count, 1)
-    guard case .toolCalls(_, let calls) = groups[0],
+    // While streaming, the full tool-progress trace (completed + in-flight) shows.
+    let streaming = ContentBlockGroup.visibleChatGroups(blocks, isStreaming: true)
+    XCTAssertEqual(streaming.count, 1)
+    guard case .toolCalls(_, let calls) = streaming[0],
       case .toolCall(_, let name, let status, _, _, _) = calls[0]
     else {
-      return XCTFail("expected the complete tool-progress trace")
+      return XCTFail("expected the complete tool-progress trace while streaming")
     }
-    XCTAssertEqual(calls.count, 2)
     XCTAssertEqual(calls.map(\.id), ["tool_1", "tool_2"])
     XCTAssertEqual(name, "search_conversations")
     XCTAssertEqual(status, .completed)
+
+    // Tool chips are live-only: they are dropped once the reply settles.
+    XCTAssertTrue(ContentBlockGroup.visibleChatGroups(blocks, isStreaming: false).isEmpty)
   }
 
-  func testMainChatKeepsActiveToolProgressAlongsideUnmaterializedSpawnLink() {
+  func testActiveToolProgressAndUnmaterializedSpawnAreLiveOnly() {
     let subagentID = UUID()
-    let groups = ContentBlockGroup.visibleChatGroups(
-      [
-        .toolCall(
-          id: "spawn_1",
-          name: "spawn_agent",
-          status: .completed,
-          output: "Started agent\nID: \(subagentID.uuidString)"
-        ),
-        .toolCall(id: "web_1", name: "WebSearch", status: .running, output: nil),
-      ],
-      isStreaming: false
-    )
+    let blocks: [ChatContentBlock] = [
+      .toolCall(
+        id: "spawn_1",
+        name: "spawn_agent",
+        status: .completed,
+        output: "Started agent\nID: \(subagentID.uuidString)"
+      ),
+      .toolCall(id: "web_1", name: "WebSearch", status: .running, output: nil),
+    ]
 
-    XCTAssertEqual(groups.count, 1)
-    guard case .toolCalls(_, let calls) = groups[0] else {
-      return XCTFail("expected one mixed lifecycle tool group")
+    // While streaming, the mixed lifecycle tool group shows both rows.
+    let streaming = ContentBlockGroup.visibleChatGroups(blocks, isStreaming: true)
+    XCTAssertEqual(streaming.count, 1)
+    guard case .toolCalls(_, let calls) = streaming[0] else {
+      return XCTFail("expected one mixed lifecycle tool group while streaming")
     }
     XCTAssertEqual(calls.map(\.id), ["spawn_1", "web_1"])
+
+    // Tool chips are live-only: dropped once the reply settles.
+    XCTAssertTrue(ContentBlockGroup.visibleChatGroups(blocks, isStreaming: false).isEmpty)
   }
 
-  func testMainChatKeepsToolProgressWhenItsLifecycleBecomesTerminal() {
-    let groups = ContentBlockGroup.visibleChatGroups(
-      [
-        .toolCall(id: "tool_1", name: "WebSearch", status: .completed, output: "done"),
-        .toolCall(id: "tool_2", name: "WebFetch", status: .failed, output: nil),
-      ],
-      isStreaming: false
-    )
+  func testTerminalToolProgressIsLiveOnly() {
+    let blocks: [ChatContentBlock] = [
+      .toolCall(id: "tool_1", name: "WebSearch", status: .completed, output: "done"),
+      .toolCall(id: "tool_2", name: "WebFetch", status: .failed, output: nil),
+    ]
 
-    XCTAssertEqual(groups.count, 1)
-    guard case .toolCalls(_, let calls) = groups[0] else {
-      return XCTFail("expected terminal tool progress to remain visible")
+    // Terminal (completed + failed) tool progress shows while streaming…
+    let streaming = ContentBlockGroup.visibleChatGroups(blocks, isStreaming: true)
+    XCTAssertEqual(streaming.count, 1)
+    guard case .toolCalls(_, let calls) = streaming[0] else {
+      return XCTFail("expected terminal tool progress while streaming")
     }
     XCTAssertEqual(calls.map(\.id), ["tool_1", "tool_2"])
+
+    // …and is dropped once the reply settles (live-only).
+    XCTAssertTrue(ContentBlockGroup.visibleChatGroups(blocks, isStreaming: false).isEmpty)
   }
 
   func testBackgroundAgentSummaryParsesLinkedAndLegacyCompletionText() {
@@ -1210,14 +1265,18 @@ final class ChatTimelineContinuityTests: XCTestCase {
     )
 
     XCTAssertTrue(
-      chatBubbleSource.contains("SelectableMarkdown(text: summary.output, sender: .ai)"),
+      chatBubbleSource.contains("OmiMarkdown(text: summary.output, sender: .ai)"),
       "background agent summary body must render markdown"
     )
     XCTAssertTrue(
-      chatBubbleSource.contains("SelectableMarkdown(text: output, sender: .ai)"),
+      chatBubbleSource.contains("OmiMarkdown(text: output, sender: .ai)"),
       "agent completion body must render markdown"
     )
-    XCTAssertTrue(chatBubbleSource.contains("Text(\"Collapse\")"))
+    XCTAssertTrue(chatBubbleSource.contains("StableChatCardHeader("))
+    XCTAssertFalse(
+      chatBubbleSource.contains("private var collapseControl"),
+      "expanded cards must keep the persistent header disclosure instead of adding a second anchor"
+    )
     XCTAssertTrue(
       chatBubbleSource.contains("AgentTimelineOpenFeedback.shouldShowLinkOut("),
       "cards must gate link-out with shared policy"
@@ -1242,40 +1301,42 @@ final class ChatTimelineContinuityTests: XCTestCase {
     )
   }
 
-  func testChatSelectionDoesNotWrapStackChromeInSelectionOverlay() throws {
-    // Mechanical guard for the omi-chat-continuity main-thread freeze:
-    // ChatMessagesView used to apply `.textSelection(.enabled)` on the LazyVStack,
-    // wrapping every agent-card header Text in SelectionOverlay and thrashing
-    // GraphHost via setFont → invalidateIntrinsicContentSize.
-    let root = URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
+  @MainActor
+  func testCompletedChatTranscriptLayoutConvergesAcrossRepeatedResizes() {
+    let messages = (0..<16).map { index in
+      """
+      Completed response \(index) includes **formatted text**, `inline code`, and a list:
 
-    let messagesSource = try String(
-      contentsOf: root.appendingPathComponent("Sources/MainWindow/Components/ChatMessagesView.swift"),
-      encoding: .utf8
-    )
-    let markdownSource = try String(
-      contentsOf: root.appendingPathComponent("Sources/MainWindow/Components/SelectableMarkdown.swift"),
-      encoding: .utf8
-    )
-    let bubbleSource = try String(
-      contentsOf: root.appendingPathComponent("Sources/MainWindow/Components/ChatBubble.swift"),
-      encoding: .utf8
+      - First point with enough content to wrap when the transcript narrows
+      - Second point with a stable whole-message copy action
+      """
+    }
+    let host = NSHostingView(
+      rootView: ScrollView {
+        LazyVStack(alignment: .leading, spacing: 8) {
+          ForEach(messages.indices, id: \.self) { index in
+            OmiMarkdown(text: messages[index], sender: .ai)
+          }
+        }
+      }
     )
 
-    XCTAssertFalse(
-      messagesSource.contains(".textSelection(.enabled)"),
-      "chat message stack must not enable selection on chrome Text views"
-    )
-    XCTAssertTrue(
-      markdownSource.contains(".textSelection(.enabled)"),
-      "SelectableMarkdown must opt message bodies into selection"
-    )
-    XCTAssertTrue(
-      bubbleSource.contains(".textSelection(.disabled)"),
-      "agent card headers must disable SelectionOverlay on truncated snippets"
-    )
+    var sizesByWidth = [CGFloat: CGSize]()
+    for width in [620.0, 1100.0, 760.0, 980.0, 620.0, 1100.0] {
+      host.frame = NSRect(x: 0, y: 0, width: width, height: 720)
+      host.layoutSubtreeIfNeeded()
+
+      let size = host.fittingSize
+      XCTAssertTrue(size.width.isFinite, "transcript width must remain finite")
+      XCTAssertTrue(size.height.isFinite, "transcript height must remain finite")
+      XCTAssertGreaterThan(size.height, 0, "completed messages must remain visible")
+
+      if let previous = sizesByWidth[width] {
+        XCTAssertEqual(previous, size, "repeating a transcript width must converge to the same layout")
+      } else {
+        sizesByWidth[width] = size
+      }
+    }
   }
 
   func testCanonicalSurfacesBindSharedProviderMessages() throws {
@@ -1286,26 +1347,8 @@ final class ChatTimelineContinuityTests: XCTestCase {
       .deletingLastPathComponent()
       .deletingLastPathComponent()
 
-    let chatPage = try String(
-      contentsOf: root.appendingPathComponent("Sources/MainWindow/Pages/ChatPage.swift"),
-      encoding: .utf8)
-    XCTAssertTrue(
-      chatPage.contains("messages: chatProvider.messages,"),
-      "main Chat must bind the shared ChatProvider timeline"
-    )
-    XCTAssertFalse(
-      chatPage.contains("transcriptMessages"),
-      "main Chat must not filter notch/PTT turns out of history"
-    )
-    XCTAssertTrue(
-      chatPage.contains("openAgentChatFromTimeline(agentID: agentID, completion: completion)"),
-      "main Chat must open spawned-agent links from the timeline with open result feedback"
-    )
-    XCTAssertTrue(
-      chatPage.contains("openAgentChatFromTimeline(ref: ref, completion: completion)"),
-      "main Chat must open structured agent refs with open result feedback"
-    )
-
+    // Home is the only main-window chat surface now, so the assertions the
+    // standalone chat page used to carry move onto it rather than retiring.
     let dashboard = try String(
       contentsOf: root.appendingPathComponent("Sources/MainWindow/Pages/DashboardPage.swift"),
       encoding: .utf8)
@@ -1313,6 +1356,18 @@ final class ChatTimelineContinuityTests: XCTestCase {
       dashboard.components(separatedBy: "messages: chatProvider.messages,").count - 1,
       2,
       "Home chat surfaces must bind the shared ChatProvider timeline"
+    )
+    XCTAssertFalse(
+      dashboard.contains("transcriptMessages"),
+      "Home chat must not filter notch/PTT turns out of history"
+    )
+    XCTAssertTrue(
+      dashboard.contains("openAgentChatFromTimeline(agentID: agentID, completion: completion)"),
+      "Home chat must open spawned-agent links from the timeline with open result feedback"
+    )
+    XCTAssertTrue(
+      dashboard.contains("openAgentChatFromTimeline(ref: ref, completion: completion)"),
+      "Home chat must open structured agent refs with open result feedback"
     )
     XCTAssertFalse(
       dashboard.contains("transcriptMessages"),
@@ -1378,6 +1433,22 @@ final class ChatTimelineContinuityTests: XCTestCase {
       ChatContinuityInvariants.agentPreviewText(prompt: "", output: "  only output  "),
       "only output"
     )
+    XCTAssertEqual(
+      ChatContinuityInvariants.agentCardPreviewText(
+        title: "Delegated: Address the review comments",
+        prompt: "Address the review comments",
+        output: "Done"
+      ),
+      ""
+    )
+    XCTAssertEqual(
+      ChatContinuityInvariants.agentCardPreviewText(
+        title: "Research agent",
+        prompt: "Address the review comments",
+        output: "Done"
+      ),
+      "Address the review comments"
+    )
   }
 
   func testAgentCompletionCardsUsePromptPreviewHelper() throws {
@@ -1394,12 +1465,22 @@ final class ChatTimelineContinuityTests: XCTestCase {
     )
 
     XCTAssertTrue(
-      bubble.contains("ChatContinuityInvariants.agentPreviewText(prompt: promptSnippet, output: output)"),
+      bubble.contains("ChatContinuityInvariants.agentCardPreviewText(")
+        && bubble.contains("prompt: promptSnippet")
+        && bubble.contains("output: output"),
       "AgentCompletionCard header must preview promptSnippet, not raw output"
     )
     XCTAssertTrue(
-      bubble.contains("ChatContinuityInvariants.agentPreviewText(prompt: summary.prompt, output: summary.output)"),
+      bubble.contains("prompt: summary.prompt")
+        && bubble.contains("output: summary.output"),
       "BackgroundAgentCard header must preview prompt, not raw output"
+    )
+
+    XCTAssertTrue(
+      bubble.contains("HStack(alignment: .top, spacing: OmiSpacing.xxs)")
+        && bubble.contains(".frame(width: 18, height: 18, alignment: .center)")
+        && bubble.contains(".frame(width: 28, height: 28)"),
+      "agent card headers must keep status, text hierarchy, and trailing controls top-aligned"
     )
     XCTAssertTrue(
       floating.contains("ChatContinuityInvariants.agentPreviewText(")

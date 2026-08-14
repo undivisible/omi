@@ -14,6 +14,8 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
 
+from desktop_proactive_delivery_health import PostHogQueryError, collect_from_env, doctor_metric
+
 from desktop_release_doctor_report import (
     METRIC_CONTRACTS,
     REPORT_TYPE,
@@ -221,7 +223,14 @@ def _safe_health(service_url: str) -> dict[str, object]:
         return _unavailable(f"backend health read failed: {type(error).__name__}")
     if not isinstance(payload, dict):
         return _unavailable("backend health response was not an object")
-    allowed = ("release_tag", "release_sha", "release_channel", "revision")
+    allowed = (
+        "status",
+        "service",
+        "backend_release_sha",
+        "backend_release_channel",
+        "chat_contract_version",
+        "revision",
+    )
     return {key: payload[key] for key in allowed if key in payload}
 
 
@@ -270,7 +279,14 @@ def collect_snapshot(
     match = TAG_RE.fullmatch(release_tag)
     assert match is not None
     legacy_id = f"v{match.group('version')}+{match.group('build')}"
-    tracking_sha = _run("git", "rev-list", "-n1", "desktop-backend-prod-deployed", check=False).strip()
+    metrics = {name: _unavailable("metric collection is advisory work not yet wired") for name in METRIC_CONTRACTS}
+    try:
+        metrics["proactive_delivery"] = doctor_metric(collect_from_env())
+    except (PostHogQueryError, ValueError, OSError) as error:
+        metrics["proactive_delivery"] = _unavailable(
+            f"proactive delivery query unavailable: {type(error).__name__}"
+        )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "release_id": release_tag,
@@ -287,10 +303,11 @@ def collect_snapshot(
                 "platform",
                 "version",
                 "build_number",
-                "source_sha",
+                "app_source_sha",
                 "zip_sha256",
                 "dmg_sha256",
-                "qualification",
+                "qualification_evidence_asset",
+                "qualification_evidence_sha256",
             ),
         ),
         "pointers": {
@@ -341,15 +358,12 @@ def collect_snapshot(
             "stable": _safe_static_json(bucket, "stable/latest.json"),
         },
         "backend": _safe_health(service_url),
-        "tracking": (
-            {"desktop_backend_prod_deployed_sha": tracking_sha}
-            if tracking_sha
-            else _unavailable("tracking tag is absent")
-        ),
-        "codemagic": _unavailable("Codemagic API is not yet a release-control dependency"),
-        "metrics": {
-            name: _unavailable("metric collection is advisory work not yet wired") for name in METRIC_CONTRACTS
+        "tracking": {
+            "status": "retired",
+            "reason": "independent backend provenance comes from live health identity and deploy evidence",
         },
+        "codemagic": _unavailable("Codemagic API is not yet a release-control dependency"),
+        "metrics": metrics,
     }
 
 

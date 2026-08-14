@@ -2,7 +2,6 @@
 members = [
     "agent-runtime-rust",
     "shared-rust",
-    "macos/Backend-Rust",
 ]
 resolver = "2"
 

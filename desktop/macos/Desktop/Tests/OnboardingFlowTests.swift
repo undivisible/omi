@@ -387,6 +387,82 @@ final class OnboardingFlowTests: XCTestCase {
     }
   }
 
+  /// Static tripwire: keyboard shortcut registration is a SwiftUI wiring
+  /// contract, so assert every visible onboarding proceed action remains the
+  /// default action without trying to synthesize AppKit key events in a unit test.
+  func testOnboardingProceedActionsUseDefaultActionKeyboardShortcut() throws {
+    // omi-test-quality: source-inspection -- static contract: verifies SwiftUI default-action wiring on every visible onboarding proceed control
+    let chatSource = try desktopSourceFile("Onboarding/OnboardingChatView.swift")
+    XCTAssertTrue(
+      chatSource.contains("handleOnboardingComplete()\n              })")
+        && chatSource.contains(".keyboardShortcut(.defaultAction)\n              .padding(.top"),
+      "the conversational onboarding Continue button must accept Return")
+
+    let fileIndexingSource = try desktopSourceFile("FileIndexing/FileIndexingView.swift")
+    XCTAssertTrue(
+      fileIndexingSource.contains("onComplete(totalFilesScanned)")
+        && fileIndexingSource.contains(".keyboardShortcut(.defaultAction)\n        .padding(.bottom"),
+      "the file-index onboarding Continue button must accept Return")
+
+    let secondBrainSource = try desktopSourceFile("Onboarding/SecondBrain/SBOnboardingView.swift")
+    for title in ["Set up Omi →", "Continue"] {
+      XCTAssertTrue(
+        secondBrainSource.contains("SBInkButton(title: \"\(title)\", isDefaultAction: true)"),
+        "the second-brain \(title) action must accept Return")
+    }
+    XCTAssertEqual(
+      secondBrainSource.components(separatedBy: "isDefaultAction: true").count - 1,
+      7,
+      "every visible second-brain proceed action must register Return")
+    XCTAssertTrue(
+      secondBrainSource.contains("Text(\"Continue →\")")
+        && secondBrainSource.contains(".keyboardShortcut(.defaultAction)\n      } else {"),
+      "the granted-permission Continue action must accept Return")
+
+    let componentsSource = try desktopSourceFile("MainWindow/SecondBrain/SBComponents.swift")
+    XCTAssertTrue(
+      componentsSource.contains("content.keyboardShortcut(.defaultAction)"),
+      "SBInkButton must wire opted-in proceed actions to Return")
+  }
+
+  func testDirectPermissionRequestsKeepAVisibleSkipEscape() throws {
+    // omi-test-quality: source-inspection -- the direct request_permission path is private SwiftUI state; verify its rendered escape hatch for every advertised permission.
+    let source = try desktopSourceFile("Onboarding/OnboardingChatView.swift")
+    XCTAssertTrue(
+      source.contains("Button(\"Skip for now\")")
+        && source.contains("pendingPermissionType = nil")
+        && source.contains("chatProvider.sendMessage(\"Skip\")"),
+      "a direct permission request must expose the same visible skip control as quick replies")
+    XCTAssertTrue(
+      source.contains("case \"notifications\": return !appState.hasNotificationPermission")
+        && source.contains("appState.isAccessibilityBroken"),
+      "all advertised permissions must participate in the pending-row escape hatch")
+    XCTAssertTrue(
+      source.contains("if type == \"notifications\" {\n      appState.openNotificationPreferences()"),
+      "notifications must keep a working Settings retry beside Skip for now")
+  }
+
+  func testSecondBrainCaptureDefaultsToMeetingsWithoutShortcutReminder() throws {
+    // omi-test-quality: source-inspection -- static contract: verifies the SwiftUI capture-choice hierarchy and copy
+    let secondBrainSource = try desktopSourceFile("Onboarding/SecondBrain/SBOnboardingView.swift")
+    let defaultChoice = try XCTUnwrap(
+      secondBrainSource.range(of: "model.capture(SBOnboardingModel.defaultCaptureSelection)"))
+    let continuousChoice = try XCTUnwrap(secondBrainSource.range(of: "model.capture(.always)"))
+
+    XCTAssertLessThan(
+      defaultChoice.lowerBound,
+      continuousChoice.lowerBound,
+      "Meeting-only recording must be the first capture choice")
+    XCTAssertTrue(
+      secondBrainSource[defaultChoice.lowerBound..<continuousChoice.lowerBound]
+        .contains(".keyboardShortcut(.defaultAction)"),
+      "Return must choose the meeting-only capture default")
+    XCTAssertFalse(secondBrainSource.contains("reaches me anytime"))
+    XCTAssertTrue(secondBrainSource.contains("Text(\"Only Meetings\")"))
+    XCTAssertTrue(secondBrainSource.contains("Text(\"Always On\")"))
+    XCTAssertFalse(secondBrainSource.contains("from my calendar"))
+  }
+
   // Regression: arrow navigation must be computed from persisted step state and
   // applied by the mounted view — the NSEvent monitor's captured view copy drops
   // @AppStorage writes on some macOS versions. These cover the extracted
@@ -440,11 +516,15 @@ final class OnboardingFlowTests: XCTestCase {
   }
 
   private func onboardingSourceFile(_ name: String) throws -> String {
+    try desktopSourceFile("Onboarding/\(name)")
+  }
+
+  private func desktopSourceFile(_ relativePath: String) throws -> String {
     let sourceURL = URL(fileURLWithPath: #filePath)
       .deletingLastPathComponent()
       .deletingLastPathComponent()
-      .appendingPathComponent("Sources/Onboarding")
-      .appendingPathComponent(name)
+      .appendingPathComponent("Sources")
+      .appendingPathComponent(relativePath)
     // omi-test-quality: source-inspection -- static contract: forbids uncancellable deferred-advance patterns in step views
     return try String(contentsOf: sourceURL, encoding: .utf8)
   }

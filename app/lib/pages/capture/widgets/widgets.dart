@@ -103,7 +103,8 @@ class UpdateFirmwareCardWidget extends StatelessWidget {
       builder: (context, provider, child) {
         if (!provider.havingNewFirmware) return const SizedBox();
 
-        final isOmiGlass = provider.pairedDevice?.type == DeviceType.openglass ||
+        final isOmiGlass =
+            provider.pairedDevice?.type == DeviceType.openglass ||
             (provider.pairedDevice?.name.toLowerCase().contains('glass') ?? false);
 
         return Stack(
@@ -211,6 +212,15 @@ getTranscriptWidget(
   VoidCallback? onTapWhenSearchEmpty,
   Function(TranscriptSegment)? onSegmentTap,
   Function(int)? onEditSegmentText,
+  Key? transcriptKey,
+  bool followLatest = false,
+  TranscriptScrollState? scrollState,
+  double jumpToLatestButtonBottom = 16,
+  int contentVersion = 0,
+  String layoutIdentity = 'transcript',
+  List<Widget> leadingItems = const [],
+  List<String> leadingItemIds = const [],
+  TranscriptSegmentBuilder? segmentBuilder,
 }) {
   if (conversationCreating) {
     return const Padding(
@@ -228,6 +238,7 @@ getTranscriptWidget(
 
   Widget buildTranscriptSegments() {
     return TranscriptWidget(
+      key: transcriptKey,
       segments: segments,
       horizontalMargin: horizontalMargin,
       topMargin: topMargin,
@@ -243,6 +254,14 @@ getTranscriptWidget(
       onTapWhenSearchEmpty: onTapWhenSearchEmpty,
       onSegmentTap: onSegmentTap,
       onEditSegmentText: onEditSegmentText,
+      followLatest: followLatest,
+      scrollState: scrollState,
+      jumpToLatestButtonBottom: jumpToLatestButtonBottom,
+      contentVersion: contentVersion,
+      layoutIdentity: layoutIdentity,
+      leadingItems: leadingItems,
+      leadingItemIds: leadingItemIds,
+      segmentBuilder: segmentBuilder,
     );
   }
 

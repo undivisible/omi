@@ -33,11 +33,30 @@ class WalSyncs implements IWalSync {
 
   bool _isCancelled = false;
   BtDevice? _device;
+  String? _firmwareVersion;
 
   /// Called from DeviceProvider when a device connects/disconnects so the
   /// firmware-version gate in syncAll() can route to the right Phase-0 sync.
-  void setDevice(BtDevice? device) {
+  ///
+  /// [firmwareVersion] is the enriched value resolved after getDeviceInfo();
+  /// prefer it over [device].firmwareRevision, which on the raw connect object
+  /// is frequently still 'Unknown' and would misroute ring-buffer devices to
+  /// the multi-file enumerator (so their recordings never enumerate).
+  void setDevice(BtDevice? device, {String? firmwareVersion}) {
     _device = device;
+    _firmwareVersion = firmwareVersion;
+  }
+
+  /// Best available firmware for discovery routing: the enriched value if it
+  /// resolved, otherwise whatever the raw connect object carries.
+  String? get _resolvedFirmware => resolveDiscoveryFirmware(_firmwareVersion, _device?.firmwareRevision);
+
+  /// Prefer the enriched firmware over the raw connect-object value, which is
+  /// frequently still 'Unknown'. A missing/'Unknown' enriched value falls back
+  /// to the raw one so behavior is never worse than before.
+  static String? resolveDiscoveryFirmware(String? enriched, String? raw) {
+    if (enriched != null && enriched.isNotEmpty && enriched != 'Unknown') return enriched;
+    return raw;
   }
 
   /// Firmware >= 3.0.20 speaks the ring-buffer protocol; older multi-file
@@ -105,12 +124,12 @@ class WalSyncs implements IWalSync {
   /// while a sync is in progress.
   Future<void> refreshWalsFromDevice({String? firmwareVersion}) async {
     if (_device == null) return;
-    // Prefer the caller-supplied firmware (resolved from the enriched
-    // pairedDevice) — _device here is the raw connect object whose
-    // firmwareRevision can still be 'Unknown', which would misroute discovery.
+    // Prefer the caller-supplied firmware, then the enriched value stored at
+    // setDevice — the raw connect object's firmwareRevision can still be
+    // 'Unknown', which would misroute ring-buffer discovery.
     final fw = (firmwareVersion != null && firmwareVersion.isNotEmpty && firmwareVersion != 'Unknown')
         ? firmwareVersion
-        : _device?.firmwareRevision;
+        : _resolvedFirmware;
     if (isRingBufferFirmware(fw)) {
       await _ringSync.refreshWalsFromDevice();
     } else {
@@ -240,13 +259,11 @@ class WalSyncs implements IWalSync {
       'phone': allMissing.where((w) => w.storage == WalStorage.disk || w.storage == WalStorage.mem).length,
     });
 
-    // Protect the live path before a potentially multi-hour device drain. The
-    // phone scheduler is lane-aware and sends recent WALs first; its one-job
-    // backfill window prevents this pass from flooding historical work.
-    Logger.debug("WalSyncs: Phase -1 - Uploading already-local fresh recordings");
-    DebugLogManager.logInfo('Sync Phase -1: Uploading fresh phone files first');
+    // Protect the live path before a potentially multi-hour device drain.
+    Logger.debug("WalSyncs: Phase -1 - Uploading already-local live-capture recordings");
+    DebugLogManager.logInfo('Sync Phase -1: Uploading live-capture phone files first');
     progress?.onWalSyncedProgress(0.0, phase: SyncPhase.uploadingToCloud);
-    final preDrainResult = await _phoneSync.syncFreshOnly(progress: progress);
+    final preDrainResult = await _phoneSync.syncLiveCaptureOnly(progress: progress);
     if (preDrainResult != null) {
       resp.newConversationIds.addAll(
         preDrainResult.newConversationIds.where((id) => !resp.newConversationIds.contains(id)),
@@ -257,13 +274,15 @@ class WalSyncs implements IWalSync {
         ),
       );
       resp.localUploadFailures += preDrainResult.localUploadFailures;
+      resp.localUploadPermanentFailures += preDrainResult.localUploadPermanentFailures;
+      resp.localUploadPermanentError ??= preDrainResult.localUploadPermanentError;
     }
 
     // Phase 0: New offline storage sync, gated by firmware version.
     //   fw >= 3.0.20  -> ring-buffer protocol (RingStorageSync)
     //   fw 3.0.17–.19 -> multi-file LittleFS protocol (StorageSync)
     //   fw < 3.0.17   -> falls through to Phase 1a legacy SD-card path
-    final fwVersion = _device?.firmwareRevision;
+    final fwVersion = _resolvedFirmware;
     final useRing = isRingBufferFirmware(fwVersion);
     if (useRing) {
       await _ringSync.refreshWalsFromDevice();
@@ -341,6 +360,8 @@ class WalSyncs implements IWalSync {
         ),
       );
       resp.localUploadFailures += partialRes.localUploadFailures;
+      resp.localUploadPermanentFailures += partialRes.localUploadPermanentFailures;
+      resp.localUploadPermanentError ??= partialRes.localUploadPermanentError;
     }
 
     DebugLogManager.logEvent('sync_completed', {

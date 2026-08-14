@@ -748,11 +748,6 @@ class AppLocalizationsVi extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Gói của bạn sẽ gia hạn vào $date.';
-  }
-
-  @override
   String get basicPlan => 'Gói miễn phí';
 
   @override
@@ -1472,7 +1467,7 @@ class AppLocalizationsVi extends AppLocalizations {
   String get payYourSttProvider => 'Sử dụng omi tự do. Bạn chỉ trả tiền cho nhà cung cấp STT trực tiếp.';
 
   @override
-  String get freeMinutesMonth => '1.200 phút miễn phí/tháng được bao gồm. Không giới hạn với ';
+  String get freeMinutesMonth => '300 phút miễn phí/tháng được bao gồm. Không giới hạn với ';
 
   @override
   String get omiUnlimited => 'Omi Unlimited';
@@ -1794,20 +1789,6 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get lovingOmi => 'Bạn thích Omi?';
-
-  @override
-  String get leaveReviewIos =>
-      'Giúp chúng tôi tiếp cận nhiều người hơn bằng cách để lại đánh giá trên App Store. Phản hồi của bạn có ý nghĩa rất lớn với chúng tôi!';
-
-  @override
-  String get leaveReviewAndroid =>
-      'Giúp chúng tôi tiếp cận nhiều người hơn bằng cách để lại đánh giá trên Google Play Store. Phản hồi của bạn có ý nghĩa rất lớn với chúng tôi!';
-
-  @override
-  String get rateOnAppStore => 'Đánh giá trên App Store';
-
-  @override
-  String get rateOnGooglePlay => 'Đánh giá trên Google Play';
 
   @override
   String get maybeLater => 'Có thể sau';
@@ -2142,6 +2123,18 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ Chỉnh sửa bộ nhớ';
+
+  @override
+  String get pinAsBaseline => 'Ghim làm chuẩn';
+
+  @override
+  String get unpinAsBaseline => 'Bỏ ghim khỏi chuẩn';
+
+  @override
+  String get baselineMemory => 'Bộ nhớ chuẩn';
+
+  @override
+  String get alwaysInContext => 'Luôn trong ngữ cảnh';
 
   @override
   String get memoryContentHint => 'Tôi thích ăn kem...';
@@ -4716,7 +4709,7 @@ class AppLocalizationsVi extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Không có quyền truy cập dữ liệu cụ thể nào được cấu hình.';
 
   @override
-  String get basicPlanDescription => '1.200 phút cao cấp + không giới hạn trên thiết bị';
+  String get basicPlanDescription => '300 phút cao cấp + không giới hạn trên thiết bị';
 
   @override
   String get minutes => 'phút';
@@ -6085,7 +6078,7 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1.200 phút premium/tháng. Tab Trên thiết bị cung cấp phiên âm miễn phí không giới hạn. ';
+      '300 phút premium/tháng. Tab Trên thiết bị cung cấp phiên âm miễn phí không giới hạn. ';
 
   @override
   String get audioProcessedLocally =>
@@ -9604,10 +9597,10 @@ class AppLocalizationsVi extends AppLocalizations {
       'Dữ liệu của bạn được bảo mật mặc định bằng mã hóa mạnh, và bạn kiểm soát cách nó được lưu trữ và sử dụng.';
 
   @override
-  String get sttModelAccuracy => 'Accuracy';
+  String get sttModelAccuracy => 'Độ chính xác';
 
   @override
-  String get whisperModelSizeBase => 'Base';
+  String get whisperModelSizeBase => 'Cơ bản';
 
   @override
   String get cloudTranscription => 'Phiên âm đám mây';
@@ -9616,52 +9609,52 @@ class AppLocalizationsVi extends AppLocalizations {
   String get sttProviderDeepgram => 'Deepgram';
 
   @override
-  String get deleteOnDeviceModel => 'Delete Model';
+  String get deleteOnDeviceModel => 'Xóa mô hình';
 
   @override
-  String get deleteOnDeviceModelConfirm => 'Are you sure you want to delete this model?';
+  String get deleteOnDeviceModelConfirm => 'Bạn có chắc chắn muốn xóa mô hình này không?';
 
   @override
-  String get onDeviceModelDownloaded => 'Downloaded';
+  String get onDeviceModelDownloaded => 'Đã tải xuống';
 
   @override
-  String get sttModelFaster => 'Faster';
+  String get sttModelFaster => 'Nhanh hơn';
 
   @override
-  String get sttFilterAuto => 'Auto';
+  String get sttFilterAuto => 'Tự động';
 
   @override
-  String get sttModelHigher => 'Higher';
+  String get sttModelHigher => 'Cao hơn';
 
   @override
-  String get whisperModelSizeLarge => 'Large';
+  String get whisperModelSizeLarge => 'Lớn';
 
   @override
-  String get sttModelLower => 'Lower';
+  String get sttModelLower => 'Thấp hơn';
 
   @override
-  String get whisperModelSizeMedium => 'Medium';
+  String get whisperModelSizeMedium => 'Trung bình';
 
   @override
-  String get onDeviceModelDeleted => 'Model deleted';
+  String get onDeviceModelDeleted => 'Đã xóa mô hình';
 
   @override
-  String get onDeviceModelDownloadFailed => 'Model download failed';
+  String get onDeviceModelDownloadFailed => 'Tải mô hình thất bại';
 
   @override
-  String get onDeviceModelDownloadFailedDesc => 'Failed to download Whisper model. Please try again.';
+  String get onDeviceModelDownloadFailedDesc => 'Không thể tải mô hình Whisper. Vui lòng thử lại.';
 
   @override
-  String get onDeviceModelDownloadSuccess => 'Model downloaded';
+  String get onDeviceModelDownloadSuccess => 'Đã tải mô hình';
 
   @override
-  String get onDeviceModelDownloadSuccessDesc => 'Whisper model downloaded successfully';
+  String get onDeviceModelDownloadSuccessDesc => 'Đã tải mô hình Whisper thành công';
 
   @override
-  String get onDeviceModelSize => 'Model Size';
+  String get onDeviceModelSize => 'Kích thước mô hình';
 
   @override
-  String get sttNone => 'None';
+  String get sttNone => 'Không có';
 
   @override
   String get onDeviceTranscription => 'Phiên âm trên thiết bị';
@@ -9670,10 +9663,10 @@ class AppLocalizationsVi extends AppLocalizations {
   String get onDeviceTranscriptionDesc => 'Phiên âm được xử lý cục bộ trên thiết bị của bạn';
 
   @override
-  String get sttModelSlower => 'Slower';
+  String get sttModelSlower => 'Chậm hơn';
 
   @override
-  String get whisperModelSizeSmall => 'Small';
+  String get whisperModelSizeSmall => 'Nhỏ';
 
   @override
   String get sttProviderSoniox => 'Soniox';
@@ -9688,10 +9681,10 @@ class AppLocalizationsVi extends AppLocalizations {
   String get sttProviderSpeechmatics => 'Speechmatics';
 
   @override
-  String get sttModelSpeed => 'Speed';
+  String get sttModelSpeed => 'Tốc độ';
 
   @override
-  String get whisperModelSizeTiny => 'Tiny';
+  String get whisperModelSizeTiny => 'Rất nhỏ';
 
   @override
   String get transcriptionLanguage => 'Ngôn ngữ phiên âm';
@@ -9706,51 +9699,51 @@ class AppLocalizationsVi extends AppLocalizations {
   String get whisperModelDesc => 'Chọn mô hình cho phiên âm trên thiết bị';
 
   @override
-  String get downgradeToFreemiumTitle => 'Downgrade to Freemium?';
+  String get downgradeToFreemiumTitle => 'Hạ cấp xuống gói miễn phí?';
 
   @override
-  String get downgradeLimitationsHeading => 'You will experience these limitations:';
+  String get downgradeLimitationsHeading => 'Bạn sẽ gặp các hạn chế sau:';
 
   @override
-  String get downgradeLimitBattery => '7x battery consumption';
+  String get downgradeLimitBattery => 'Tiêu hao pin gấp 7 lần';
 
   @override
-  String get downgradeLimitQuality => '30% less transcription quality';
+  String get downgradeLimitQuality => 'Chất lượng bản ghi giảm 30%';
 
   @override
-  String get downgradeLimitDelay => '5-7 second delay';
+  String get downgradeLimitDelay => 'Độ trễ 5-7 giây';
 
   @override
-  String get downgradeLimitSpeakers => 'Cannot identify speakers';
+  String get downgradeLimitSpeakers => 'Không thể nhận diện người nói';
 
   @override
-  String get downgradeAnyway => 'Downgrade Anyway';
+  String get downgradeAnyway => 'Vẫn hạ cấp';
 
   @override
-  String get googleCalendarNotConnected => 'Google Calendar Not Connected';
+  String get googleCalendarNotConnected => 'Chưa kết nối Lịch Google';
 
   @override
-  String get googleCalendarConnectPrompt => 'Connect your Google Calendar to link conversations to calendar events.';
+  String get googleCalendarConnectPrompt => 'Kết nối Lịch Google của bạn để liên kết cuộc trò chuyện với sự kiện lịch.';
 
   @override
   String linkedToEvent(String title) {
-    return 'Linked to \"$title\"';
+    return 'Đã liên kết với \"$title\"';
   }
 
   @override
-  String get failedToLinkCalendarEvent => 'Failed to link calendar event';
+  String get failedToLinkCalendarEvent => 'Không thể liên kết sự kiện lịch';
 
   @override
-  String get thanksForYourFeedback => 'Thanks for your feedback!';
+  String get thanksForYourFeedback => 'Cảm ơn phản hồi của bạn!';
 
   @override
-  String get copyMessage => 'Copy message';
+  String get copyMessage => 'Sao chép tin nhắn';
 
   @override
-  String get searchSettings => 'Search settings…';
+  String get searchSettings => 'Tìm kiếm cài đặt…';
 
   @override
-  String get errorLoadingAudio => 'Error loading audio';
+  String get errorLoadingAudio => 'Lỗi khi tải âm thanh';
 
   @override
   String get rayBanMetaMicPickerTitle => 'Chọn micrô Ray-Ban Meta của bạn';
@@ -9769,4 +9762,78 @@ class AppLocalizationsVi extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Không thể kết nối với micrô đó. Hãy đảm bảo micrô đã được kết nối trong Cài đặt iPhone.';
+
+  @override
+  String get syncStatusTooOld => 'Quá cũ để đồng bộ — Omi không thể chấp nhận';
+
+  @override
+  String get planSheetChooseYourPlan => 'Chọn gói của bạn để mở khóa Omi không giới hạn.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Có sẵn trên Mac, di động và web';
+
+  @override
+  String get popularBadge => 'PHỔ BIẾN';
+
+  @override
+  String get worksOnDesktop => 'Hoạt động trên máy tính';
+
+  @override
+  String get noDesktopAccess => 'Không hoạt động trên máy tính';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months tháng / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Miễn phí $count tháng',
+      one: 'Miễn phí 1 tháng',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi miễn phí, nhưng bản miễn phí có những giới hạn ảnh hưởng đến trải nghiệm của bạn:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'Độ trễ 5-7 giây (không theo thời gian thực)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Chuyển xuống bản miễn phí';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Nhận quyền truy cập không giới hạn miễn phí';
+
+  @override
+  String get shareDataForTraining => 'Chia sẻ dữ liệu để huấn luyện';
+
+  @override
+  String get yourRequestUnderReview => 'Yêu cầu của bạn đang được xem xét';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Cần cập nhật';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Cài đặt ứng dụng Omi mới nhất để tiếp tục sau khi di chuyển tài khoản.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Đang di chuyển';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Tài khoản của bạn đang được di chuyển. Các tính năng sản phẩm tạm dừng cho đến khi hoàn tất.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Tài khoản của bạn đang bảo trì sau khi hoàn tác di chuyển. Một số dữ liệu mới hơn có thể bị cô lập.';
+
+  @override
+  String get accountCutoverOpenStore => 'Mở cửa hàng';
 }

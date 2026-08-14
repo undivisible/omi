@@ -9,10 +9,8 @@ are applied after the legacy profile is read and affect only `omi:auto:*` gatewa
 Each override names one configured feature, selects its gateway provider/model, and may set
 provider request options such as `reasoning_effort` or Anthropic `effort`.
 
-Generated lanes normally use `openai.chat_completions`. The `chat_agent` Anthropic override is the explicit
-exception: it uses `anthropic.messages` and advertises streaming + tools because `/v1/messages` preserves the native
-Anthropic agentic contract. The OpenAI-compatible resolver rejects that surface, and the Messages router rejects
-OpenAI-compatible lanes; this prevents the same lane from silently claiming two incompatible protocols.
+Generated lanes use `openai.chat_completions`, including `chat_agent`, which is pinned to the OpenAI-compatible Luna
+route. Anthropic Messages remains a separate provider surface for lanes that explicitly select Anthropic.
 
 ## Runtime credential and readiness contract
 
@@ -35,10 +33,22 @@ versus after the first non-empty chunk are separate bounded phases. Provider com
 client received the terminal chunk.
 
 `llm_gateway_requests_total` and `llm_gateway_request_latency_seconds` include bounded `api_surface`, `streaming`,
-`phase`, and `credential_source` labels. `llm_gateway_stream_ttfb_seconds` measures time to the first non-empty
-chunk. Request IDs are opaque UUIDs emitted only in response headers and structured logs, never as Prometheus
-labels. Pre-route contract failures use `llm_gateway_request_rejections_total{api_surface,error_class}`; service
-authentication failures use `llm_gateway_auth_rejections_total{reason}`.
+`phase`, `credential_source`, and `provider_rejection` labels. The provider-rejection label is parsed from only an
+allowlisted set of upstream error codes and parameter roots; unknown values collapse to `other_4xx`, and provider
+messages, request values, and raw bodies never become labels or terminal-log fields. Provider 4xx responses that
+describe unsupported parameters remain `capability_mismatch`; invalid requests such as
+`context_length_exceeded` use the separate, non-fallback `provider_invalid_request` failure class.
+`llm_gateway_stream_ttfb_seconds` measures time to the first non-empty chunk. Request IDs are opaque UUIDs emitted
+only in response headers and structured logs, never as Prometheus labels. Pre-route contract failures use
+`llm_gateway_request_rejections_total{api_surface,error_class}`; service authentication failures use
+`llm_gateway_auth_rejections_total{reason}`.
+
+`route_serving_class` is a closed `active|canary|lkg|actual_fallback` contract. `fallback_used=true` requires a
+prior eligible provider failure and a subsequent successful provider/route; merely selecting LKG for shadow,
+disabled, 0%, or an out-of-bucket canary request is `route_serving_class="lkg"` with `fallback_used="false"`.
+Bounded from/to route artifact labels and a non-`none` `fallback_reason` identify real failover without request or
+user identifiers. `llm_gateway_config_info` separately publishes the immutable image tag plus active/LKG route
+artifact IDs and SHA-256 content digests, avoiding build/config identity labels on the high-volume request counter.
 
 ## Usage accounting ledger
 

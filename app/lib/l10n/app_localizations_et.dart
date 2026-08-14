@@ -747,11 +747,6 @@ class AppLocalizationsEt extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Teie plaan uueneb $date.';
-  }
-
-  @override
   String get basicPlan => 'Tasuta plaan';
 
   @override
@@ -1790,20 +1785,6 @@ class AppLocalizationsEt extends AppLocalizations {
   String get lovingOmi => 'Meeldib Omi?';
 
   @override
-  String get leaveReviewIos =>
-      'Aidake meil jõuda rohkemate inimesteni, jättes arvustuse App Store\'i. Teie tagasiside on meile ülimalt oluline!';
-
-  @override
-  String get leaveReviewAndroid =>
-      'Aidake meil jõuda rohkemate inimesteni, jättes arvustuse Google Play poodi. Teie tagasiside on meile ülimalt oluline!';
-
-  @override
-  String get rateOnAppStore => 'Hinda App Store\'is';
-
-  @override
-  String get rateOnGooglePlay => 'Hinda Google Play\'s';
-
-  @override
   String get maybeLater => 'Võib-olla hiljem';
 
   @override
@@ -2139,6 +2120,18 @@ class AppLocalizationsEt extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ Muuda mälestust';
+
+  @override
+  String get pinAsBaseline => 'Kinnita alusena';
+
+  @override
+  String get unpinAsBaseline => 'Eemalda aluselt';
+
+  @override
+  String get baselineMemory => 'Alusmälu';
+
+  @override
+  String get alwaysInContext => 'Alati kontekstis';
 
   @override
   String get memoryContentHint => 'Mulle meeldib süüa jäätist...';
@@ -9603,10 +9596,10 @@ class AppLocalizationsEt extends AppLocalizations {
       'Sinu andmed on vaikimisi kaitstud tugeva krüptimisega ja sina kontrollid, kuidas neid salvestatakse ja kasutatakse.';
 
   @override
-  String get sttModelAccuracy => 'Accuracy';
+  String get sttModelAccuracy => 'Täpsus';
 
   @override
-  String get whisperModelSizeBase => 'Base';
+  String get whisperModelSizeBase => 'Baas';
 
   @override
   String get cloudTranscription => 'Pilves transkriptsioon';
@@ -9615,52 +9608,52 @@ class AppLocalizationsEt extends AppLocalizations {
   String get sttProviderDeepgram => 'Deepgram';
 
   @override
-  String get deleteOnDeviceModel => 'Delete Model';
+  String get deleteOnDeviceModel => 'Kustuta mudel';
 
   @override
-  String get deleteOnDeviceModelConfirm => 'Are you sure you want to delete this model?';
+  String get deleteOnDeviceModelConfirm => 'Kas oled kindel, et soovid selle mudeli kustutada?';
 
   @override
-  String get onDeviceModelDownloaded => 'Downloaded';
+  String get onDeviceModelDownloaded => 'Alla laaditud';
 
   @override
-  String get sttModelFaster => 'Faster';
+  String get sttModelFaster => 'Kiirem';
 
   @override
-  String get sttFilterAuto => 'Auto';
+  String get sttFilterAuto => 'Automaatne';
 
   @override
-  String get sttModelHigher => 'Higher';
+  String get sttModelHigher => 'Kõrgem';
 
   @override
-  String get whisperModelSizeLarge => 'Large';
+  String get whisperModelSizeLarge => 'Suur';
 
   @override
-  String get sttModelLower => 'Lower';
+  String get sttModelLower => 'Madalam';
 
   @override
-  String get whisperModelSizeMedium => 'Medium';
+  String get whisperModelSizeMedium => 'Keskmine';
 
   @override
-  String get onDeviceModelDeleted => 'Model deleted';
+  String get onDeviceModelDeleted => 'Mudel kustutatud';
 
   @override
-  String get onDeviceModelDownloadFailed => 'Model download failed';
+  String get onDeviceModelDownloadFailed => 'Mudeli allalaadimine ebaõnnestus';
 
   @override
-  String get onDeviceModelDownloadFailedDesc => 'Failed to download Whisper model. Please try again.';
+  String get onDeviceModelDownloadFailedDesc => 'Whisperi mudeli allalaadimine ebaõnnestus. Palun proovi uuesti.';
 
   @override
-  String get onDeviceModelDownloadSuccess => 'Model downloaded';
+  String get onDeviceModelDownloadSuccess => 'Mudel alla laaditud';
 
   @override
-  String get onDeviceModelDownloadSuccessDesc => 'Whisper model downloaded successfully';
+  String get onDeviceModelDownloadSuccessDesc => 'Whisperi mudel laaditi edukalt alla';
 
   @override
-  String get onDeviceModelSize => 'Model Size';
+  String get onDeviceModelSize => 'Mudeli suurus';
 
   @override
-  String get sttNone => 'None';
+  String get sttNone => 'Puudub';
 
   @override
   String get onDeviceTranscription => 'Seadmes transkriptsioon';
@@ -9669,10 +9662,10 @@ class AppLocalizationsEt extends AppLocalizations {
   String get onDeviceTranscriptionDesc => 'Transkriptsioon töödeldakse kohapeal sinu seadmes';
 
   @override
-  String get sttModelSlower => 'Slower';
+  String get sttModelSlower => 'Aeglasem';
 
   @override
-  String get whisperModelSizeSmall => 'Small';
+  String get whisperModelSizeSmall => 'Väike';
 
   @override
   String get sttProviderSoniox => 'Soniox';
@@ -9687,10 +9680,10 @@ class AppLocalizationsEt extends AppLocalizations {
   String get sttProviderSpeechmatics => 'Speechmatics';
 
   @override
-  String get sttModelSpeed => 'Speed';
+  String get sttModelSpeed => 'Kiirus';
 
   @override
-  String get whisperModelSizeTiny => 'Tiny';
+  String get whisperModelSizeTiny => 'Pisike';
 
   @override
   String get transcriptionLanguage => 'Transkriptsiooni keel';
@@ -9705,51 +9698,51 @@ class AppLocalizationsEt extends AppLocalizations {
   String get whisperModelDesc => 'Vali seadmes transkriptsiooni mudel';
 
   @override
-  String get downgradeToFreemiumTitle => 'Downgrade to Freemium?';
+  String get downgradeToFreemiumTitle => 'Kas minna üle tasuta plaanile?';
 
   @override
-  String get downgradeLimitationsHeading => 'You will experience these limitations:';
+  String get downgradeLimitationsHeading => 'Sind ootavad ees järgmised piirangud:';
 
   @override
-  String get downgradeLimitBattery => '7x battery consumption';
+  String get downgradeLimitBattery => '7x suurem akukulu';
 
   @override
-  String get downgradeLimitQuality => '30% less transcription quality';
+  String get downgradeLimitQuality => '30% madalam transkriptsiooni kvaliteet';
 
   @override
-  String get downgradeLimitDelay => '5-7 second delay';
+  String get downgradeLimitDelay => '5–7 sekundi pikkune viivitus';
 
   @override
-  String get downgradeLimitSpeakers => 'Cannot identify speakers';
+  String get downgradeLimitSpeakers => 'Kõnelejaid ei saa tuvastada';
 
   @override
-  String get downgradeAnyway => 'Downgrade Anyway';
+  String get downgradeAnyway => 'Alanda siiski';
 
   @override
-  String get googleCalendarNotConnected => 'Google Calendar Not Connected';
+  String get googleCalendarNotConnected => 'Google Kalender pole ühendatud';
 
   @override
-  String get googleCalendarConnectPrompt => 'Connect your Google Calendar to link conversations to calendar events.';
+  String get googleCalendarConnectPrompt => 'Ühenda oma Google Kalender, et siduda vestlusi kalendrisündmustega.';
 
   @override
   String linkedToEvent(String title) {
-    return 'Linked to \"$title\"';
+    return 'Seotud sündmusega „$title“';
   }
 
   @override
-  String get failedToLinkCalendarEvent => 'Failed to link calendar event';
+  String get failedToLinkCalendarEvent => 'Kalendrisündmuse sidumine ebaõnnestus';
 
   @override
-  String get thanksForYourFeedback => 'Thanks for your feedback!';
+  String get thanksForYourFeedback => 'Täname tagasiside eest!';
 
   @override
-  String get copyMessage => 'Copy message';
+  String get copyMessage => 'Kopeeri sõnum';
 
   @override
-  String get searchSettings => 'Search settings…';
+  String get searchSettings => 'Otsi seadetest…';
 
   @override
-  String get errorLoadingAudio => 'Error loading audio';
+  String get errorLoadingAudio => 'Heli laadimine ebaõnnestus';
 
   @override
   String get rayBanMetaMicPickerTitle => 'Valige Ray-Ban Meta mikrofon';
@@ -9769,4 +9762,76 @@ class AppLocalizationsEt extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Selle mikrofoniga ei saanud ühendust luua. Veenduge, et see oleks iPhone\'i seadetes ühendatud.';
+
+  @override
+  String get syncStatusTooOld => 'Sünkroonimiseks liiga vana — Omi ei saa seda vastu võtta';
+
+  @override
+  String get planSheetChooseYourPlan => 'Vali oma pakett, et avada piiramatu Omi.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Saadaval Macis, mobiilis ja veebis';
+
+  @override
+  String get popularBadge => 'POPULAARNE';
+
+  @override
+  String get worksOnDesktop => 'Töötab arvutis';
+
+  @override
+  String get noDesktopAccess => 'Ei tööta arvutis';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months kuud / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count kuud tasuta',
+      one: '1 kuu tasuta',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro => 'Omi on tasuta, kuid tasuta versioonil on piirangud, mis mõjutavad sinu kogemust:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5–7 sekundi viivitus (mitte reaalajas)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Mine üle tasuta versioonile';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Saa tasuta piiramatu juurdepääs';
+
+  @override
+  String get shareDataForTraining => 'Jaga andmeid treenimiseks';
+
+  @override
+  String get yourRequestUnderReview => 'Sinu taotlus on läbivaatamisel';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Päivitys vaaditaan';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage => 'Asenna uusin Omi-sovellus jatkaaksesi tilin siirron jälkeen.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Siirto käynnissä';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Tiliäsi siirretään. Tuoteominaisuudet on keskeytetty, kunnes siirto valmistuu.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Tilisi on huollossa siirron peruutuksen jälkeen. Uudempaa dataa voi olla eristettynä.';
+
+  @override
+  String get accountCutoverOpenStore => 'Avaa kauppa';
 }

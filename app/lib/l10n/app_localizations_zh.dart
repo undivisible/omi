@@ -18,7 +18,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get conversationTab => '对话';
 
   @override
-  String get transcriptTab => '转录';
+  String get transcriptTab => '文字记录';
 
   @override
   String get actionItemsTab => '行动项';
@@ -196,7 +196,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recordingsToSync => '待同步录音';
 
   @override
-  String get allCaughtUp => '已全部同步';
+  String get allCaughtUp => '已全部完成';
 
   @override
   String get sync => '同步';
@@ -730,11 +730,6 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String cancelAtPeriodEnd(String date) {
     return '您的套餐将于 $date 结束。';
-  }
-
-  @override
-  String renewsOn(String date) {
-    return '您的套餐将于 $date 续订。';
   }
 
   @override
@@ -1759,18 +1754,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get lovingOmi => '喜欢 Omi 吗？';
 
   @override
-  String get leaveReviewIos => '在 App Store 留下评论，帮助我们。';
-
-  @override
-  String get leaveReviewAndroid => '在 Google Play 留下评论，帮助我们。';
-
-  @override
-  String get rateOnAppStore => '在 App Store 评价';
-
-  @override
-  String get rateOnGooglePlay => '在 Google Play 评价';
-
-  @override
   String get maybeLater => '以后再说';
 
   @override
@@ -1846,7 +1829,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get whatsYourName => '您叫什么名字？';
 
   @override
-  String get speakTranscribeSummarize => '说话。转录。摘要。';
+  String get speakTranscribeSummarize => '开口说，自动转写，智能总结。';
 
   @override
   String get signInWithApple => '通过 Apple 登录';
@@ -1861,10 +1844,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get termsOfUse => '使用条款';
 
   @override
-  String get omiYourAiCompanion => 'Omi – 您的 AI 伴侣';
+  String get omiYourAiCompanion => 'Omi – 您的 AI 助手';
 
   @override
-  String get captureEveryMoment => '捕捉每一个瞬间。获得 AI 摘要。';
+  String get captureEveryMoment => '记录每个瞬间，AI 为您生成摘要。';
 
   @override
   String get appleWatchSetup => 'Apple Watch 设置';
@@ -2097,6 +2080,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get editMemory => '✏️ 编辑记忆';
 
   @override
+  String get pinAsBaseline => '设为基准记忆';
+
+  @override
+  String get unpinAsBaseline => '取消基准记忆';
+
+  @override
+  String get baselineMemory => '基准记忆';
+
+  @override
+  String get alwaysInContext => '始终包含在上下文中';
+
+  @override
   String get memoryContentHint => '我喜欢冰淇淋...';
 
   @override
@@ -2264,10 +2259,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get actionItemsCopiedToClipboard => '行动项已复制到剪贴板';
 
   @override
-  String get summarize => '总结';
+  String get summarize => '生成摘要';
 
   @override
-  String get generateSummary => '生成总结';
+  String get generateSummary => '生成摘要';
 
   @override
   String get conversationNotFoundOrDeleted => '未找到对话或已被删除';
@@ -5255,7 +5250,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get wrappedTopPhrasesLabel => '常说的话';
 
   @override
-  String get wrappedLetsHitRewind => '让我们回顾你的';
+  String get wrappedLetsHitRewind => '让我们回顾一下你的';
 
   @override
   String get wrappedGenerateMyWrapped => '生成我的年度回顾';
@@ -5492,7 +5487,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recognizingOthers => '识别他人 👀';
 
   @override
-  String get keepGoingGreat => '继续，你做得很棒';
+  String get keepGoingGreat => '加油，继续保持！';
 
   @override
   String get somethingWentWrongTryAgain => '出错了！请稍后重试。';
@@ -5553,11 +5548,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String summaryGeneratedFor(String date) {
-    return '已为 $date 生成总结';
+    return '已为 $date 生成摘要';
   }
 
   @override
-  String get failedToGenerateSummary => '生成总结失败。请确保当天有对话记录。';
+  String get failedToGenerateSummary => '生成摘要失败。请确保当天有对话记录。';
 
   @override
   String get recap => '回顾';
@@ -9429,10 +9424,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get dataEncryptedBanner => '您的数据默认通过强加密保护，并且由您掌控其存储和使用方式。';
 
   @override
-  String get sttModelAccuracy => 'Accuracy';
+  String get sttModelAccuracy => '准确度';
 
   @override
-  String get whisperModelSizeBase => 'Base';
+  String get whisperModelSizeBase => '基础';
 
   @override
   String get cloudTranscription => '云端转录';
@@ -9441,52 +9436,52 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sttProviderDeepgram => 'Deepgram';
 
   @override
-  String get deleteOnDeviceModel => 'Delete Model';
+  String get deleteOnDeviceModel => '删除模型';
 
   @override
-  String get deleteOnDeviceModelConfirm => 'Are you sure you want to delete this model?';
+  String get deleteOnDeviceModelConfirm => '确定要删除此模型吗？';
 
   @override
-  String get onDeviceModelDownloaded => 'Downloaded';
+  String get onDeviceModelDownloaded => '已下载';
 
   @override
-  String get sttModelFaster => 'Faster';
+  String get sttModelFaster => '更快';
 
   @override
-  String get sttFilterAuto => 'Auto';
+  String get sttFilterAuto => '自动';
 
   @override
-  String get sttModelHigher => 'Higher';
+  String get sttModelHigher => '更高';
 
   @override
-  String get whisperModelSizeLarge => 'Large';
+  String get whisperModelSizeLarge => '大型';
 
   @override
-  String get sttModelLower => 'Lower';
+  String get sttModelLower => '更低';
 
   @override
-  String get whisperModelSizeMedium => 'Medium';
+  String get whisperModelSizeMedium => '中型';
 
   @override
-  String get onDeviceModelDeleted => 'Model deleted';
+  String get onDeviceModelDeleted => '模型已删除';
 
   @override
-  String get onDeviceModelDownloadFailed => 'Model download failed';
+  String get onDeviceModelDownloadFailed => '模型下载失败';
 
   @override
-  String get onDeviceModelDownloadFailedDesc => 'Failed to download Whisper model. Please try again.';
+  String get onDeviceModelDownloadFailedDesc => 'Whisper 模型下载失败，请重试。';
 
   @override
-  String get onDeviceModelDownloadSuccess => 'Model downloaded';
+  String get onDeviceModelDownloadSuccess => '模型已下载';
 
   @override
-  String get onDeviceModelDownloadSuccessDesc => 'Whisper model downloaded successfully';
+  String get onDeviceModelDownloadSuccessDesc => 'Whisper 模型下载成功';
 
   @override
-  String get onDeviceModelSize => 'Model Size';
+  String get onDeviceModelSize => '模型大小';
 
   @override
-  String get sttNone => 'None';
+  String get sttNone => '无';
 
   @override
   String get onDeviceTranscription => '设备端转录';
@@ -9495,10 +9490,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get onDeviceTranscriptionDesc => '转录在您的设备上本地处理';
 
   @override
-  String get sttModelSlower => 'Slower';
+  String get sttModelSlower => '更慢';
 
   @override
-  String get whisperModelSizeSmall => 'Small';
+  String get whisperModelSizeSmall => '小型';
 
   @override
   String get sttProviderSoniox => 'Soniox';
@@ -9513,10 +9508,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sttProviderSpeechmatics => 'Speechmatics';
 
   @override
-  String get sttModelSpeed => 'Speed';
+  String get sttModelSpeed => '速度';
 
   @override
-  String get whisperModelSizeTiny => 'Tiny';
+  String get whisperModelSizeTiny => '微型';
 
   @override
   String get transcriptionLanguage => '转录语言';
@@ -9531,51 +9526,51 @@ class AppLocalizationsZh extends AppLocalizations {
   String get whisperModelDesc => '选择设备端转录的模型';
 
   @override
-  String get downgradeToFreemiumTitle => 'Downgrade to Freemium?';
+  String get downgradeToFreemiumTitle => '降级到免费计划？';
 
   @override
-  String get downgradeLimitationsHeading => 'You will experience these limitations:';
+  String get downgradeLimitationsHeading => '您将遇到以下限制：';
 
   @override
-  String get downgradeLimitBattery => '7x battery consumption';
+  String get downgradeLimitBattery => '电池消耗增加 7 倍';
 
   @override
-  String get downgradeLimitQuality => '30% less transcription quality';
+  String get downgradeLimitQuality => '转录质量降低 30%';
 
   @override
-  String get downgradeLimitDelay => '5-7 second delay';
+  String get downgradeLimitDelay => '5-7 秒延迟';
 
   @override
-  String get downgradeLimitSpeakers => 'Cannot identify speakers';
+  String get downgradeLimitSpeakers => '无法识别说话人';
 
   @override
-  String get downgradeAnyway => 'Downgrade Anyway';
+  String get downgradeAnyway => '仍要降级';
 
   @override
-  String get googleCalendarNotConnected => 'Google Calendar Not Connected';
+  String get googleCalendarNotConnected => '未连接 Google 日历';
 
   @override
-  String get googleCalendarConnectPrompt => 'Connect your Google Calendar to link conversations to calendar events.';
+  String get googleCalendarConnectPrompt => '连接您的 Google 日历，即可将对话关联到日历活动。';
 
   @override
   String linkedToEvent(String title) {
-    return 'Linked to \"$title\"';
+    return '已关联到“$title”';
   }
 
   @override
-  String get failedToLinkCalendarEvent => 'Failed to link calendar event';
+  String get failedToLinkCalendarEvent => '关联日历活动失败';
 
   @override
-  String get thanksForYourFeedback => 'Thanks for your feedback!';
+  String get thanksForYourFeedback => '感谢您的反馈！';
 
   @override
-  String get copyMessage => 'Copy message';
+  String get copyMessage => '复制消息';
 
   @override
-  String get searchSettings => 'Search settings…';
+  String get searchSettings => '搜索设置…';
 
   @override
-  String get errorLoadingAudio => 'Error loading audio';
+  String get errorLoadingAudio => '音频加载失败';
 
   @override
   String get rayBanMetaMicPickerTitle => '选择您的 Ray-Ban Meta 麦克风';
@@ -9591,4 +9586,74 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get rayBanMetaMicPickerConnectError => '无法连接到该麦克风。请确保它已在 iPhone 设置中连接。';
+
+  @override
+  String get syncStatusTooOld => '太旧，无法同步 — Omi 无法接收';
+
+  @override
+  String get planSheetChooseYourPlan => '选择你的方案，解锁无限 Omi。';
+
+  @override
+  String get availableOnMacMobileWeb => '支持 Mac、手机和网页';
+
+  @override
+  String get popularBadge => '热门';
+
+  @override
+  String get worksOnDesktop => '支持桌面端';
+
+  @override
+  String get noDesktopAccess => '不支持桌面端';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months 个月 / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '免费 $count 个月',
+      one: '免费 1 个月',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro => 'Omi 是免费的，但免费版存在一些会影响体验的限制：';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5-7 秒延迟（非实时）';
+
+  @override
+  String get downgradeToFreemiumAction => '降级到免费版';
+
+  @override
+  String get getFreeUnlimitedAccess => '免费获取无限访问权限';
+
+  @override
+  String get shareDataForTraining => '共享数据用于训练';
+
+  @override
+  String get yourRequestUnderReview => '你的申请正在审核中';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => '需要更新';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage => '请安装最新的 Omi 应用，以便在账户迁移后继续使用。';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => '正在迁移';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage => '您的账户正在迁移。产品功能将暂停，直到迁移完成。';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage => '账户迁移回滚后处于维护状态。部分较新的数据可能被隔离。';
+
+  @override
+  String get accountCutoverOpenStore => '打开应用商店';
 }

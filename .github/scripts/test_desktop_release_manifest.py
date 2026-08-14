@@ -90,7 +90,16 @@ class ManifestValidationTests(unittest.TestCase):
             with self.subTest(key=key):
                 manifest = fixture("app-only.json")
                 manifest[key] = value
-                with self.assertRaisesRegex(manifest_contract.ManifestError, "passed at tier T2"):
+                with self.assertRaisesRegex(manifest_contract.ManifestError, "T2, signed-smoke, or emergency"):
+                    manifest_contract.validate_manifest(manifest)
+
+    def test_rejects_numeric_qualification_passed_truthiness(self) -> None:
+        # ``0 == False`` in Python set membership; guard must reject non-boolean values.
+        for value in (0, 1):
+            with self.subTest(value=value):
+                manifest = fixture("app-only.json")
+                manifest["qualification_passed"] = value
+                with self.assertRaisesRegex(manifest_contract.ManifestError, "T2, signed-smoke, or emergency"):
                     manifest_contract.validate_manifest(manifest)
 
     def test_rejects_unknown_fields(self) -> None:
@@ -144,7 +153,7 @@ class ManifestIntegrityTests(unittest.TestCase):
         )
         self.assertEqual(
             manifest_contract.manifest_digest(manifest),
-            "sha256:9d2e2de26473a24adf498b3a814a532c7ee56d6ae18746d2444d9d9ca9c20beb",
+            "sha256:bec1b723483d46f415ff57d86b7fc59c3fc8e9faf484043834665453aafc10e7",
         )
 
     def test_valid_identity_and_digest_mutations_fail_detached_verification(self) -> None:
@@ -160,8 +169,6 @@ class ManifestIntegrityTests(unittest.TestCase):
                 "build_number": 12073,
                 "zip_url": "https://github.com/BasedHardware/omi/releases/download/v0.12.73%2B12073-macos/Omi.zip",
                 "dmg_url": "https://github.com/BasedHardware/omi/releases/download/v0.12.73%2B12073-macos/omi.dmg",
-                "beta_zip_url": "https://github.com/BasedHardware/omi/releases/download/v0.12.73%2B12073-macos/Omi.Beta.zip",
-                "beta_dmg_url": "https://github.com/BasedHardware/omi/releases/download/v0.12.73%2B12073-macos/omi-beta.dmg",
             }
         )
         release_identity["compatibility_contract"].update(

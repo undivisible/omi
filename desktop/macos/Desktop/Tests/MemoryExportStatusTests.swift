@@ -7,6 +7,7 @@ final class MemoryExportStatusTests: XCTestCase {
 
   override func setUp() {
     super.setUp()
+    DesktopDiagnosticsManager.shared.resetForTests()
     resetMemoryExportDefaults()
     tempHome = FileManager.default.temporaryDirectory
       .appendingPathComponent("memory-export-status-\(UUID().uuidString)", isDirectory: true)
@@ -39,6 +40,18 @@ final class MemoryExportStatusTests: XCTestCase {
     XCTAssertFalse(claudeCodeStatus.hasConnection)
     XCTAssertFalse(openClawStatus.hasConnection)
     XCTAssertFalse(hermesStatus.hasConnection)
+  }
+
+  /// The ChatGPT directory listing is a single global plugin that always
+  /// authorizes under `omi-chatgpt-prod`, even on a build pointed at the dev
+  /// backend. Grant verification must accept that prod client ID regardless of
+  /// `chatgptOAuthClientID`'s env switch, or ChatGPT never flips to connected on
+  /// Beta (the shipped symptom: Claude verified, ChatGPT stuck).
+  func testChatGPTGrantVerificationAcceptsProdDirectoryClientOnAnyBackend() {
+    XCTAssertTrue(MemoryExportDestination.chatgpt.cloudOAuthGrantClientIDs.contains("omi-chatgpt-prod"))
+    XCTAssertTrue(MemoryExportDestination.chatgpt.cloudOAuthGrantClientIDs.contains("omi-chatgpt-dev"))
+    XCTAssertEqual(MemoryExportDestination.claude.cloudOAuthGrantClientIDs, ["omi-claude-prod"])
+    XCTAssertTrue(MemoryExportDestination.notion.cloudOAuthGrantClientIDs.isEmpty)
   }
 
   func testMarkConnectedDoesNotMaskMissingLocalMCPConfig() async {
@@ -74,6 +87,21 @@ final class MemoryExportStatusTests: XCTestCase {
     XCTAssertFalse(status.isConfigured)
     XCTAssertFalse(status.hasConnection)
     XCTAssertEqual(presentation.primaryActionTitle, "Add Omi to ChatGPT")
+  }
+
+  func testCachedCloudGrantStatusReadSignalsInferredConnectorAuthority() async {
+    await MemoryExportService.shared.markConnected(.chatgpt)
+
+    let status = await MemoryExportService.shared.status(for: .chatgpt)
+
+    XCTAssertTrue(status.hasConnection)
+    let signal = DesktopDiagnosticsManager.shared.currentSnapshotsForSentry().last {
+      $0["seam"] as? String == DesktopStateAuthoritySeam.connectorStatus.rawValue
+    }
+    XCTAssertEqual(signal?["direction"] as? String, "cloud_grant_status_inferred")
+    XCTAssertEqual(signal?["from"] as? String, "cached_or_derived")
+    XCTAssertEqual(signal?["to"] as? String, "connected")
+    XCTAssertEqual(signal?["subject"] as? String, "chatgpt")
   }
 
   func testOnlyLocalAgentSetupDestinationsHaveLocallyVerifiableLiveSetup() {
@@ -330,6 +358,94 @@ final class MemoryExportStatusTests: XCTestCase {
     """.write(to: config, atomically: true, encoding: .utf8)
 
     XCTAssertFalse(MemoryExportConnectionDetector.hasExistingConnection(for: .codex, matchingKey: "test-key"))
+  }
+
+  func testExportPaginationContinuesUntilShortPageWithoutSkipping() async throws {
+    var requestedOffsets: [Int] = []
+    let values: [Int] = try await MemoryExportService.fetchAllPages(pageSize: 2) { limit, offset in
+      requestedOffsets.append(offset)
+      let all = [1, 2, 3, 4, 5]
+      return Array(all.dropFirst(offset).prefix(limit))
+    }
+
+    XCTAssertEqual(values, [1, 2, 3, 4, 5])
+    XCTAssertEqual(requestedOffsets, [0, 2, 4])
+  }
+
+  func testExportCursorPaginationContinuesUntilNextCursorAbsent() async throws {
+    var requestedCursors: [String?] = []
+    let pages: [APIClient.MemoryListPage] = [
+      APIClient.MemoryListPage(
+        memories: [Self.sampleMemory(id: "m1"), Self.sampleMemory(id: "m2")],
+        nextCursor: "cursor-a",
+        canonicalLifecycleExposed: true,
+        deviceScopeSupported: true,
+        defaultMemoryDeleteSupported: true),
+      APIClient.MemoryListPage(
+        memories: [Self.sampleMemory(id: "m3")],
+        nextCursor: nil,
+        canonicalLifecycleExposed: true,
+        deviceScopeSupported: true,
+        defaultMemoryDeleteSupported: true),
+    ]
+    var pageIndex = 0
+    let values = try await MemoryExportService.fetchAllCursorPages(pageSize: 2) { _, cursor in
+      requestedCursors.append(cursor)
+      defer { pageIndex += 1 }
+      return pages[pageIndex]
+    }
+
+    XCTAssertEqual(values.map(\.id), ["m1", "m2", "m3"])
+    XCTAssertEqual(requestedCursors.map { $0 ?? "<nil>" }, ["<nil>", "cursor-a"])
+  }
+
+  func testExportCursorPaginationRejectsRepeatedContinuationToken() async throws {
+    let page = APIClient.MemoryListPage(
+      memories: [Self.sampleMemory(id: "m1")],
+      nextCursor: "cursor-a",
+      canonicalLifecycleExposed: true,
+      deviceScopeSupported: true,
+      defaultMemoryDeleteSupported: true)
+
+    do {
+      _ = try await MemoryExportService.fetchAllCursorPages(pageSize: 2) { _, _ in page }
+      XCTFail("A repeated continuation token must not produce a partial successful export")
+    } catch let error as MemoryExportError {
+      guard case .requestFailed(let message) = error else {
+        return XCTFail("Unexpected export error: \(error)")
+      }
+      XCTAssertTrue(message.contains("repeated a continuation token"))
+    }
+  }
+
+  private static func sampleMemory(id: String) -> ServerMemory {
+    ServerMemory(
+      id: id,
+      content: "content-\(id)",
+      category: .interesting,
+      tier: .longTerm,
+      tierIsExplicit: true,
+      createdAt: Date(timeIntervalSince1970: 0),
+      updatedAt: Date(timeIntervalSince1970: 0),
+      conversationId: nil,
+      reviewed: false,
+      userReview: nil,
+      visibility: "private",
+      manuallyAdded: false,
+      scoring: nil,
+      source: "desktop",
+      confidence: nil,
+      sourceApp: nil,
+      contextSummary: nil,
+      isRead: false,
+      isDismissed: false,
+      tags: [],
+      reasoning: nil,
+      currentActivity: nil,
+      inputDeviceName: nil,
+      windowTitle: nil,
+      headline: nil
+    )
   }
 
   private func resetMemoryExportDefaults() {

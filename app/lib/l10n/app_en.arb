@@ -981,16 +981,6 @@
             }
         }
     },
-    "renewsOn": "Your plan renews on {date}.",
-    "@renewsOn": {
-        "description": "Renewal message",
-        "placeholders": {
-            "date": {
-                "type": "String",
-                "example": "Jan 1, 2026"
-            }
-        }
-    },
     "basicPlan": "Free Plan",
     "@basicPlan": {
         "description": "Basic plan name"
@@ -1714,22 +1704,6 @@
     "@lovingOmi": {
         "description": "Title for the app review prompt"
     },
-    "leaveReviewIos": "Help us reach more people by leaving a review in the App Store. Your feedback means the world to us!",
-    "@leaveReviewIos": {
-        "description": "App review prompt text for iOS users"
-    },
-    "leaveReviewAndroid": "Help us reach more people by leaving a review in the Google Play Store. Your feedback means the world to us!",
-    "@leaveReviewAndroid": {
-        "description": "App review prompt text for Android users"
-    },
-    "rateOnAppStore": "Rate on App Store",
-    "@rateOnAppStore": {
-        "description": "Button text to rate on Apple App Store"
-    },
-    "rateOnGooglePlay": "Rate on Google Play",
-    "@rateOnGooglePlay": {
-        "description": "Button text to rate on Google Play Store"
-    },
     "maybeLater": "Maybe Later",
     "@maybeLater": {
         "description": "Button text to defer action"
@@ -2199,6 +2173,22 @@
     "editMemory": "✏️ Edit Memory",
     "@editMemory": {
         "description": "Dialog title when editing a memory"
+    },
+    "pinAsBaseline": "Pin as Baseline",
+    "@pinAsBaseline": {
+        "description": "Label for pinning a memory as baseline"
+    },
+    "unpinAsBaseline": "Unpin from Baseline",
+    "@unpinAsBaseline": {
+        "description": "Label for unpinning a memory from baseline"
+    },
+    "baselineMemory": "Baseline Memory",
+    "@baselineMemory": {
+        "description": "Label for baseline memory"
+    },
+    "alwaysInContext": "Always in context",
+    "@alwaysInContext": {
+        "description": "Description for baseline memory being always in context"
     },
     "memoryContentHint": "I like to eat ice cream...",
     "@memoryContentHint": {
@@ -11554,5 +11544,95 @@
     "rayBanMetaMicPickerConnectError": "Could not connect to that microphone. Make sure it is connected in iPhone Settings.",
     "@rayBanMetaMicPickerConnectError": {
         "description": "Error shown when the selected Bluetooth HFP microphone cannot connect"
+    },
+    "syncStatusTooOld": "Too old to sync — Omi can't accept it",
+    "planSheetChooseYourPlan": "Choose your plan to unlock unlimited Omi.",
+    "@planSheetChooseYourPlan": {
+        "description": "Plans sheet subtitle prompting a free user to pick a paid plan"
+    },
+    "availableOnMacMobileWeb": "Available on Mac, mobile, and web",
+    "@availableOnMacMobileWeb": {
+        "description": "Plans sheet highlight: which platforms Omi runs on"
+    },
+    "popularBadge": "POPULAR",
+    "@popularBadge": {
+        "description": "Badge shown on the most popular plan card"
+    },
+    "worksOnDesktop": "Works on Desktop",
+    "@worksOnDesktop": {
+        "description": "Plan card row: this tier includes the desktop app"
+    },
+    "noDesktopAccess": "Doesn't work on Desktop",
+    "@noDesktopAccess": {
+        "description": "Plan card row: this tier does not include the desktop app"
+    },
+    "annualBillingSummary": "{months} months / {price}",
+    "@annualBillingSummary": {
+        "description": "Annual plan card subtitle showing the billing term and total price",
+        "placeholders": {
+            "months": {
+                "type": "int"
+            },
+            "price": {
+                "type": "String"
+            }
+        }
+    },
+    "monthsFreeBadge": "{count, plural, =1{1 Month Free} other{{count} Months Free}}",
+    "@monthsFreeBadge": {
+        "description": "Badge on an annual plan card showing how many months the annual price saves",
+        "placeholders": {
+            "count": {
+                "type": "int"
+            }
+        }
+    },
+    "freemiumLimitsIntro": "Omi is free, but freemium has limits that affect your experience:",
+    "@freemiumLimitsIntro": {
+        "description": "Intro line above the list of free-tier limitations"
+    },
+    "downgradeLimitDelayNotRealTime": "5-7 second delay (not real-time)",
+    "@downgradeLimitDelayNotRealTime": {
+        "description": "Free-tier limitation: transcription is delayed rather than live"
+    },
+    "downgradeToFreemiumAction": "Downgrade to Freemium",
+    "@downgradeToFreemiumAction": {
+        "description": "Button that moves the user from a paid plan to the free tier"
+    },
+    "getFreeUnlimitedAccess": "Get Free Unlimited Access",
+    "@getFreeUnlimitedAccess": {
+        "description": "Title of the training-data opt-in card offering free unlimited access"
+    },
+    "shareDataForTraining": "Share data for training",
+    "@shareDataForTraining": {
+        "description": "Subtitle of the training-data opt-in card"
+    },
+    "yourRequestUnderReview": "Your request is under review",
+    "@yourRequestUnderReview": {
+        "description": "Subtitle shown while a training-data access request is pending"
+    },
+    "accountCutoverUpdateRequiredTitle": "Update Required",
+    "@accountCutoverUpdateRequiredTitle": {
+        "description": "Title for account cutover force-upgrade blocking screen"
+    },
+    "accountCutoverUpdateRequiredMessage": "Install the latest Omi app to continue after account migration.",
+    "@accountCutoverUpdateRequiredMessage": {
+        "description": "Body for account cutover force-upgrade blocking screen"
+    },
+    "accountCutoverMigrationInProgressTitle": "Migration in Progress",
+    "@accountCutoverMigrationInProgressTitle": {
+        "description": "Title for account cutover migration-maintenance blocking screen"
+    },
+    "accountCutoverMigrationInProgressMessage": "Your account is migrating. Product features are paused until migration finishes.",
+    "@accountCutoverMigrationInProgressMessage": {
+        "description": "Body for account cutover migration-maintenance blocking screen"
+    },
+    "accountCutoverMigrationRollbackMessage": "Your account is in maintenance after a migration rollback. Some newer data may be stranded.",
+    "@accountCutoverMigrationRollbackMessage": {
+        "description": "Body when cutover rollback stranded newer data"
+    },
+    "accountCutoverOpenStore": "Open store",
+    "@accountCutoverOpenStore": {
+        "description": "Button that opens the app store for a required cutover upgrade"
     }
 }

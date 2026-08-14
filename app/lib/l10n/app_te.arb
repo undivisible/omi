@@ -966,16 +966,6 @@
             }
         }
     },
-    "renewsOn": "మీ ప్లాన్ {date}న పునరుద్ధరించబడుతుంది.",
-    "@renewsOn": {
-        "description": "Renewal message",
-        "placeholders": {
-            "date": {
-                "type": "String",
-                "example": "Jan 1, 2026"
-            }
-        }
-    },
     "basicPlan": "ఉచిత ప్లాన్",
     "@basicPlan": {
         "description": "Basic plan name"
@@ -1698,22 +1688,6 @@
     "lovingOmi": "Omi ని ఇష్టపడుతున్నారా?",
     "@lovingOmi": {
         "description": "Title for the app review prompt"
-    },
-    "leaveReviewIos": "App Store లో సమీక్ష ఇవ్వడం ద్వారా మాకు మరిన్ని ప్రజలకు చేరుకోవడానికి సహాయం చేయండి. మీ ఫీడ్‌బ్యాక్ మాకు ప్రపంచానికి అర్థమైనది!",
-    "@leaveReviewIos": {
-        "description": "App review prompt text for iOS users"
-    },
-    "leaveReviewAndroid": "Google Play Store లో సమీక్ష ఇవ్వడం ద్వారా మాకు మరిన్ని ప్రజలకు చేరుకోవడానికి సహాయం చేయండి. మీ ఫీడ్‌బ్యాక్ మాకు ప్రపంచానికి అర్థమైనది!",
-    "@leaveReviewAndroid": {
-        "description": "App review prompt text for Android users"
-    },
-    "rateOnAppStore": "App Store లో రేట్ చేయండి",
-    "@rateOnAppStore": {
-        "description": "Button text to rate on Apple App Store"
-    },
-    "rateOnGooglePlay": "Google Play లో రేట్ చేయండి",
-    "@rateOnGooglePlay": {
-        "description": "Button text to rate on Google Play Store"
     },
     "maybeLater": "బహుశా తర్వాత",
     "@maybeLater": {
@@ -10583,6 +10557,7 @@
     "syncStatusWaiting": "సింక్ కోసం వేచి ఉంది",
     "syncStatusRetrying": "ప్రాసెస్ చేయలేకపోయింది — మళ్లీ ప్రయత్నిస్తోంది",
     "syncStatusFailed": "విఫలమైంది — Retry నొక్కండి",
+    "syncStatusTooOld": "సింక్ చేయడానికి చాలా పాతది — Omi దీన్ని అంగీకరించలేదు",
     "syncStatusFileUnavailable": "ఫైల్ అందుబాటులో లేదు",
     "syncStatusUploaded": "అప్‌లోడ్ అయింది · Omiలో ప్రాసెస్ అవుతోంది",
     "noRecordingsYet": "ఇంకా రికార్డింగ్‌లు లేవు",
@@ -10733,5 +10708,77 @@
     "rayBanMetaMicPickerDescription": "మీ కళ్లద్దాల Bluetooth మైక్రోఫోన్‌ను ఎంచుకోండి. Omi దాన్ని ఉపయోగిస్తున్నప్పుడు సంగీతం పాజ్ అవుతుంది.",
     "rayBanMetaMicPickerEmpty": "Bluetooth మైక్రోఫోన్‌లు ఏవీ కనుగొనబడలేదు. iPhone సెట్టింగ్‌లలో కళ్లద్దాలను కనెక్ట్ చేసి మళ్లీ ప్రయత్నించండి.",
     "rayBanMetaMicPickerLoadError": "Bluetooth మైక్రోఫోన్‌లను లోడ్ చేయలేకపోయాము. Bluetooth ఆన్‌లో ఉందో చూసి మళ్లీ ప్రయత్నించండి.",
-    "rayBanMetaMicPickerConnectError": "ఆ మైక్రోఫోన్‌కు కనెక్ట్ కాలేకపోయాము. అది iPhone సెట్టింగ్‌లలో కనెక్ట్ అయిందని నిర్ధారించుకోండి."
+    "rayBanMetaMicPickerConnectError": "ఆ మైక్రోఫోన్‌కు కనెక్ట్ కాలేకపోయాము. అది iPhone సెట్టింగ్‌లలో కనెక్ట్ అయిందని నిర్ధారించుకోండి.",
+    "cloudTranscription": "క్లౌడ్ ట్రాన్‌స్క్రిప్షన్",
+    "copyMessage": "సందేశాన్ని కాపీ చేయండి",
+    "deleteOnDeviceModel": "మోడల్‌ను తొలగించు",
+    "deleteOnDeviceModelConfirm": "ఈ మోడల్‌ను తొలగించాలని మీరు ఖచ్చితంగా అనుకుంటున్నారా?",
+    "downgradeAnyway": "అయినా డౌన్‌గ్రేడ్ చేయండి",
+    "downgradeLimitBattery": "7 రెట్లు ఎక్కువ బ్యాటరీ వినియోగం",
+    "downgradeLimitDelay": "5-7 సెకన్ల ఆలస్యం",
+    "downgradeLimitQuality": "30% తక్కువ ట్రాన్‌స్క్రిప్షన్ నాణ్యత",
+    "downgradeLimitSpeakers": "స్పీకర్‌లను గుర్తించలేరు",
+    "downgradeLimitationsHeading": "మీరు ఈ పరిమితులను ఎదుర్కొంటారు:",
+    "downgradeToFreemiumTitle": "ఉచిత ప్లాన్‌కు మారాలా?",
+    "errorLoadingAudio": "ఆడియో లోడ్ చేయడంలో లోపం",
+    "failedToLinkCalendarEvent": "క్యాలెండర్ ఈవెంట్‌ను లింక్ చేయడం విఫలమైంది",
+    "googleCalendarConnectPrompt": "సంభాషణలను క్యాలెండర్ ఈవెంట్‌లకు లింక్ చేయడానికి మీ Google క్యాలెండర్‌ను కనెక్ట్ చేయండి.",
+    "googleCalendarNotConnected": "Google క్యాలెండర్ కనెక్ట్ కాలేదు",
+    "linkedToEvent": "“{title}”కి లింక్ చేయబడింది",
+    "onDeviceModelDeleted": "మోడల్ తొలగించబడింది",
+    "onDeviceModelDownloadFailed": "మోడల్ డౌన్‌లోడ్ విఫలమైంది",
+    "onDeviceModelDownloadFailedDesc": "Whisper మోడల్‌ను డౌన్‌లోడ్ చేయడం విఫలమైంది. దయచేసి మళ్లీ ప్రయత్నించండి.",
+    "onDeviceModelDownloadSuccess": "మోడల్ డౌన్‌లోడ్ అయింది",
+    "onDeviceModelDownloadSuccessDesc": "Whisper మోడల్ విజయవంతంగా డౌన్‌లోడ్ అయింది",
+    "onDeviceModelDownloaded": "డౌన్‌లోడ్ అయింది",
+    "onDeviceModelSize": "మోడల్ పరిమాణం",
+    "onDeviceTranscription": "పరికరంలో ట్రాన్‌స్క్రిప్షన్",
+    "onDeviceTranscriptionDesc": "ట్రాన్‌స్క్రిప్షన్ మీ పరికరంలోనే స్థానికంగా ప్రాసెస్ చేయబడుతుంది",
+    "searchSettings": "సెట్టింగ్‌లలో శోధించండి…",
+    "speechToTextProvider": "స్పీచ్-టు-టెక్స్ట్ ప్రదాత",
+    "speechToTextProviderDesc": "ట్రాన్‌స్క్రిప్షన్ కోసం ఉపయోగించే సేవను ఎంచుకోండి",
+    "sttFilterAuto": "స్వయంచాలకం",
+    "sttModelAccuracy": "ఖచ్చితత్వం",
+    "sttModelFaster": "వేగవంతం",
+    "sttModelHigher": "ఎక్కువ",
+    "sttModelLower": "తక్కువ",
+    "sttModelSlower": "నెమ్మది",
+    "sttModelSpeed": "వేగం",
+    "sttNone": "ఏదీ లేదు",
+    "sttProviderDeepgram": "Deepgram",
+    "sttProviderSoniox": "Soniox",
+    "sttProviderSpeechmatics": "Speechmatics",
+    "thanksForYourFeedback": "మీ అభిప్రాయానికి ధన్యవాదాలు!",
+    "transcriptionLanguage": "ట్రాన్‌స్క్రిప్షన్ భాష",
+    "transcriptionLanguageDesc": "ప్రసంగ ట్రాన్‌స్క్రిప్షన్ కోసం భాషను ఎంచుకోండి",
+    "whisperModel": "Whisper మోడల్",
+    "whisperModelDesc": "పరికరంలో ట్రాన్‌స్క్రిప్షన్ కోసం మోడల్‌ను ఎంచుకోండి",
+    "whisperModelSizeBase": "ప్రాథమికం",
+    "whisperModelSizeLarge": "పెద్దది",
+    "whisperModelSizeMedium": "మధ్యస్థం",
+    "whisperModelSizeSmall": "చిన్నది",
+    "whisperModelSizeTiny": "అతి చిన్నది",
+    "planSheetChooseYourPlan": "అపరిమిత Omi అన్‌లాక్ చేయడానికి మీ ప్లాన్‌ను ఎంచుకోండి.",
+    "availableOnMacMobileWeb": "Mac, మొబైల్ మరియు వెబ్‌లో అందుబాటులో ఉంది",
+    "popularBadge": "ప్రసిద్ధం",
+    "worksOnDesktop": "డెస్క్‌టాప్‌లో పనిచేస్తుంది",
+    "noDesktopAccess": "డెస్క్‌టాప్‌లో పనిచేయదు",
+    "annualBillingSummary": "{months} నెలలు / {price}",
+    "monthsFreeBadge": "{count, plural, =1{1 నెల ఉచితం} other{{count} నెలలు ఉచితం}}",
+    "freemiumLimitsIntro": "Omi ఉచితం, కానీ ఉచిత వెర్షన్‌లో మీ అనుభవాన్ని ప్రభావితం చేసే పరిమితులు ఉన్నాయి:",
+    "downgradeLimitDelayNotRealTime": "5-7 సెకన్ల ఆలస్యం (రియల్-టైమ్ కాదు)",
+    "downgradeToFreemiumAction": "ఉచిత వెర్షన్‌కు మారండి",
+    "getFreeUnlimitedAccess": "ఉచిత అపరిమిత యాక్సెస్ పొందండి",
+    "shareDataForTraining": "శిక్షణ కోసం డేటాను భాగస్వామ్యం చేయండి",
+    "yourRequestUnderReview": "మీ అభ్యర్థన సమీక్షలో ఉంది",
+    "pinAsBaseline": "ఆధారంగా పిన్ చేయండి",
+    "unpinAsBaseline": "ఆధారం నుండి అన్‌పిన్ చేయండి",
+    "baselineMemory": "ఆధార మెమరీ",
+    "alwaysInContext": "ఎల్లప్పుడూ సందర్భంలో",
+    "accountCutoverUpdateRequiredTitle": "अपडेट आवश्यक",
+    "accountCutoverUpdateRequiredMessage": "खाता माइग्रेशन के बाद जारी रखने के लिए नवीनतम Omi ऐप इंस्टॉल करें।",
+    "accountCutoverMigrationInProgressTitle": "माइग्रेशन जारी है",
+    "accountCutoverMigrationInProgressMessage": "आपका खाता माइग्रेट हो रहा है। माइग्रेशन पूरा होने तक उत्पाद सुविधाएँ रुकी रहेंगी।",
+    "accountCutoverMigrationRollbackMessage": "माइग्रेशन रोलबैक के बाद आपका खाता रखरखाव में है। कुछ नए डेटा अलग रह सकते हैं।",
+    "accountCutoverOpenStore": "स्टोर खोलें"
 }

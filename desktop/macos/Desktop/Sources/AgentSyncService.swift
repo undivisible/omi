@@ -151,6 +151,10 @@ actor AgentSyncService {
     TableSpec(name: "observations", appendOnly: true, excludedColumns: []),
   ]
 
+  static var syncedTableNames: Set<String> {
+    Set(tableSpecs.map(\.name))
+  }
+
   private let tables = AgentSyncService.tableSpecs
   private static let requiredRemoteTables = Set(tableSpecs.map(\.name))
 
@@ -211,8 +215,10 @@ actor AgentSyncService {
     let stopGeneration = syncGeneration
     let wasRunning = isRunning
     isRunning = false
-    syncTask?.cancel()
+    let task = syncTask
+    task?.cancel()
     syncTask = nil
+    await task?.value
     guard wasRunning else { return }
     if flushPendingChanges {
       log("AgentSync: stopping — flushing final changes")
@@ -345,6 +351,13 @@ actor AgentSyncService {
     }
   }
 
+  /// AgentSync reads every table on a short polling interval. Forward a local
+  /// SQLite failure to the lifecycle owner so a recoverable stale pool can be
+  /// closed and reopened instead of being retried indefinitely.
+  static func reportDatabaseReadFailure(_ error: Error) async {
+    await RewindDatabase.shared.reportQueryError(error)
+  }
+
   // MARK: - Re-upload trigger
 
   /// `/health` normally catches a missing database, while the table-bound
@@ -368,9 +381,10 @@ actor AgentSyncService {
       return
     }
 
-    guard let url = URL(string: "http://\(vmIP):8080/health") else { return }
+    guard let url = URL(string: "http://\(vmIP):8080/health?token=\(authToken)") else { return }
     do {
       var request = URLRequest(url: url)
+      request.setValue("Bearer \(authToken)", forHTTPHeaderField: "Authorization")
       request.timeoutInterval = 15
       let (data, response) = try await networkHooks.dataForRequest(request)
       guard isCurrent(generation: generation, ownerID: ownerID, vmIP: vmIP) else { return }
@@ -483,11 +497,13 @@ actor AgentSyncService {
           let allColumns = columnInfos.compactMap { $0["name"] as? String }
           return allColumns.filter { !spec.excludedColumns.contains($0) }
         }
+        await RewindDatabase.shared.reportQuerySuccess()
         guard syncGeneration == generation else { return 0 }
         cachedTableColumns[spec.name] = fetched
         columns = fetched
       } catch {
         log("AgentSync: error fetching schema for \(spec.name) — \(error.localizedDescription)")
+        await Self.reportDatabaseReadFailure(error)
         return 0
       }
     }
@@ -539,6 +555,7 @@ actor AgentSyncService {
         return AgentSyncRowsPayload(rows: rows)
       }
       let rows = rowsPayload.rows
+      await RewindDatabase.shared.reportQuerySuccess()
 
       guard syncGeneration == generation else { return 0 }
 
@@ -578,6 +595,7 @@ actor AgentSyncService {
       }
     } catch {
       log("AgentSync: error reading \(spec.name) — \(error.localizedDescription)")
+      await Self.reportDatabaseReadFailure(error)
     }
     return 0
   }

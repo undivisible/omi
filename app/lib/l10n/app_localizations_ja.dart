@@ -734,11 +734,6 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'プランは$dateに更新されます。';
-  }
-
-  @override
   String get basicPlan => '無料プラン';
 
   @override
@@ -1761,18 +1756,6 @@ class AppLocalizationsJa extends AppLocalizations {
   String get lovingOmi => 'Omiを楽しんでいますか？';
 
   @override
-  String get leaveReviewIos => 'App Storeでレビューを残して、より多くの人に届けるお手伝いをしてください。皆様のフィードバックは私たちにとって非常に大切です！';
-
-  @override
-  String get leaveReviewAndroid => 'Google Playストアでレビューを残して、より多くの人に届けるお手伝いをしてください。皆様のフィードバックは私たちにとって非常に大切です！';
-
-  @override
-  String get rateOnAppStore => 'App Storeで評価';
-
-  @override
-  String get rateOnGooglePlay => 'Google Playで評価';
-
-  @override
   String get maybeLater => '後で';
 
   @override
@@ -2099,6 +2082,18 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ 記憶を編集';
+
+  @override
+  String get pinAsBaseline => 'ベースラインに固定';
+
+  @override
+  String get unpinAsBaseline => 'ベースラインから解除';
+
+  @override
+  String get baselineMemory => 'ベースラインメモリ';
+
+  @override
+  String get alwaysInContext => '常にコンテキストに含む';
 
   @override
   String get memoryContentHint => 'アイスクリームが好き...';
@@ -5971,7 +5966,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get batteryDrainSignificantly => 'バッテリー消費が大幅に増加します。';
 
   @override
-  String get premiumMinutesMonth => '月間 600 分のプレミアム枠。「オンデバイス」タブでは無料の無制限文字起こしが利用できます。';
+  String get premiumMinutesMonth => '月間 300 分のプレミアム枠。「オンデバイス」タブでは無料の無制限文字起こしが利用できます。';
 
   @override
   String get audioProcessedLocally => '音声はローカルで処理されます。オフラインで動作し、よりプライベートですが、バッテリー消費が増えます。';
@@ -9609,4 +9604,74 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get rayBanMetaMicPickerConnectError => 'そのマイクに接続できませんでした。iPhone の設定で接続されていることを確認してください。';
+
+  @override
+  String get syncStatusTooOld => '古すぎて同期できません — Omi は受け付けられません';
+
+  @override
+  String get planSheetChooseYourPlan => 'プランを選んで、無制限のOmiを解放しましょう。';
+
+  @override
+  String get availableOnMacMobileWeb => 'Mac、モバイル、ウェブで利用可能';
+
+  @override
+  String get popularBadge => '人気';
+
+  @override
+  String get worksOnDesktop => 'デスクトップで利用できます';
+
+  @override
+  String get noDesktopAccess => 'デスクトップでは利用できません';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$monthsか月 / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$countか月無料',
+      one: '1か月無料',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro => 'Omiは無料ですが、無料版には体験に影響する制限があります:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5〜7秒の遅延（リアルタイムではありません）';
+
+  @override
+  String get downgradeToFreemiumAction => '無料版に変更';
+
+  @override
+  String get getFreeUnlimitedAccess => '無制限アクセスを無料で入手';
+
+  @override
+  String get shareDataForTraining => 'トレーニング用にデータを共有';
+
+  @override
+  String get yourRequestUnderReview => 'リクエストを確認中です';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'アップデートが必要です';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage => 'アカウント移行後も続行するには、最新のOmiアプリをインストールしてください。';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => '移行中';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage => 'アカウントを移行中です。移行が完了するまでプロダクト機能は一時停止されます。';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage => '移行のロールバック後、アカウントはメンテナンス中です。新しいデータの一部が孤立している可能性があります。';
+
+  @override
+  String get accountCutoverOpenStore => 'ストアを開く';
 }

@@ -48,6 +48,55 @@ import XCTest
       XCTAssertFalse(ConferencingApps.isNativeCallApp(bundleID: "com.google.Chrome"))
     }
 
+    // Regression: issue #10143 — Omi's periodic capture stopped an active screen share.
+    // These signatures gate the capture pause; a match means "user is presenting now".
+    func testShareIndicatorMatchesKnownPresentingWindows() {
+      // Zoom floating share controls (internal window names, present only while sharing).
+      XCTAssertTrue(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "zoom.us", title: "zoom share statusbar window"))
+      XCTAssertTrue(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "zoom.us", title: "zoom share toolbar window"))
+      // Teams presenting toolbar.
+      XCTAssertTrue(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "Microsoft Teams", title: "Screen sharing toolbar"))
+      XCTAssertTrue(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "MSTeams", title: "Screen sharing toolbar"))
+      // Browser (Meet / Teams web) stop-sharing bubble.
+      XCTAssertTrue(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "Google Chrome", title: "meet.google.com is sharing your screen."))
+      XCTAssertTrue(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "Arc", title: "teams.microsoft.com is sharing a window."))
+    }
+
+    func testShareIndicatorIgnoresOrdinaryCallAndAppWindows() {
+      // In a Zoom call but NOT sharing: main meeting window must not pause capture.
+      XCTAssertFalse(
+        ConferencingApps.isShareIndicatorWindow(ownerName: "zoom.us", title: "Zoom Meeting"))
+      XCTAssertFalse(
+        ConferencingApps.isShareIndicatorWindow(ownerName: "Microsoft Teams", title: "Standup | Microsoft Teams"))
+      // A Teams chat about screen sharing is not the presenting toolbar.
+      XCTAssertFalse(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "Microsoft Teams", title: "Screen sharing issues | Microsoft Teams"))
+      // Ordinary browser tab, even one talking about screen sharing.
+      XCTAssertFalse(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "Google Chrome", title: "How to stop sharing your screen - Google Meet Help"))
+      // Non-conferencing app can never be a share indicator, whatever the title says.
+      XCTAssertFalse(
+        ConferencingApps.isShareIndicatorWindow(
+          ownerName: "Finder", title: "zoom share statusbar window"))
+      XCTAssertFalse(ConferencingApps.isShareIndicatorWindow(ownerName: "zoom.us", title: nil))
+      XCTAssertFalse(ConferencingApps.isShareIndicatorWindow(ownerName: nil, title: "zoom share"))
+      XCTAssertFalse(ConferencingApps.isShareIndicatorWindow(ownerName: "zoom.us", title: ""))
+    }
+
     func testBrowserBundleIDPrefixMatchingCatchesHelpers() {
       // Browsers route call audio through helper processes — match by prefix.
       XCTAssertTrue(ConferencingApps.isBrowserBundleID("net.imput.helium.helper"))  // Helium (Meet)
@@ -264,11 +313,11 @@ import XCTest
     }
   }
 
-  // MARK: - AssistantSettings.systemAudioCaptureMode
+  // MARK: - AssistantSettings.audioRecordingMode
 
   @MainActor
-  final class SystemAudioCaptureModeSettingsTests: XCTestCase {
-    private let key = "systemAudioCaptureMode"
+  final class AudioRecordingModeSettingsTests: XCTestCase {
+    private let key = AssistantSettings.audioRecordingModeDefaultsKey
 
     override func setUp() {
       super.setUp()
@@ -281,21 +330,45 @@ import XCTest
     }
 
     func testDefaultsToOnlyDuringMeetings() {
-      XCTAssertEqual(AssistantSettings.shared.systemAudioCaptureMode, .onlyDuringMeetings)
+      XCTAssertEqual(AssistantSettings.shared.audioRecordingMode, .onlyMeetings)
     }
 
     func testPersistsAndReadsBack() {
-      AssistantSettings.shared.systemAudioCaptureMode = .onlyDuringMeetings
-      XCTAssertEqual(UserDefaults.standard.string(forKey: key), "onlyDuringMeetings")
-      XCTAssertEqual(AssistantSettings.shared.systemAudioCaptureMode, .onlyDuringMeetings)
+      AssistantSettings.shared.audioRecordingMode = .onlyMeetings
+      XCTAssertEqual(UserDefaults.standard.string(forKey: key), "onlyMeetings")
+      XCTAssertEqual(AssistantSettings.shared.audioRecordingMode, .onlyMeetings)
 
-      AssistantSettings.shared.systemAudioCaptureMode = .never
-      XCTAssertEqual(AssistantSettings.shared.systemAudioCaptureMode, .never)
+      AssistantSettings.shared.audioRecordingMode = .off
+      XCTAssertEqual(AssistantSettings.shared.audioRecordingMode, .off)
     }
 
     func testUnknownRawValueFallsBackToDefault() {
       UserDefaults.standard.set("garbage", forKey: key)
-      XCTAssertEqual(AssistantSettings.shared.systemAudioCaptureMode, .onlyDuringMeetings)
+      XCTAssertEqual(AssistantSettings.shared.audioRecordingMode, .onlyMeetings)
+    }
+
+    func testLegacySettingsCollapseIntoOneMode() {
+      XCTAssertEqual(
+        AssistantSettings.migratedAudioRecordingMode(
+          legacyTranscriptionEnabled: false,
+          legacySystemAudioModeRaw: "always"),
+        .off)
+      XCTAssertEqual(
+        AssistantSettings.migratedAudioRecordingMode(
+          legacyTranscriptionEnabled: true,
+          legacySystemAudioModeRaw: "onlyDuringMeetings"),
+        .onlyMeetings)
+      XCTAssertEqual(
+        AssistantSettings.migratedAudioRecordingMode(
+          legacyTranscriptionEnabled: true,
+          legacySystemAudioModeRaw: "always"),
+        .always)
+      XCTAssertEqual(
+        AssistantSettings.migratedAudioRecordingMode(
+          legacyTranscriptionEnabled: true,
+          legacySystemAudioModeRaw: "never"),
+        .always,
+        "Legacy mic-only users should remain recording rather than become Off")
     }
   }
 
@@ -303,10 +376,52 @@ import XCTest
 
   final class MeetingConversationBoundaryPolicyTests: XCTestCase {
 
+    func testAmbientToMeetingClosesAmbientConversation() {
+      XCTAssertEqual(
+        MeetingConversationBoundaryPolicy.transition(previousRole: .ambient, meetingActive: true),
+        .init(nextRole: .meeting, finalizationReason: .meetingStarted)
+      )
+    }
+
+    func testMeetingToAmbientClosesMeetingConversation() {
+      XCTAssertEqual(
+        MeetingConversationBoundaryPolicy.transition(previousRole: .meeting, meetingActive: false),
+        .init(nextRole: .ambient, finalizationReason: .meetingEnded)
+      )
+    }
+
+    func testStableAmbientDoesNotRotate() {
+      XCTAssertNil(
+        MeetingConversationBoundaryPolicy.transition(previousRole: .ambient, meetingActive: false)
+      )
+    }
+
+    func testStableMeetingDoesNotRotate() {
+      XCTAssertNil(
+        MeetingConversationBoundaryPolicy.transition(previousRole: .meeting, meetingActive: true)
+      )
+    }
+
+    func testFailedRotationDoesNotCommitTheDetectedRole() throws {
+      let transition = try XCTUnwrap(
+        MeetingConversationBoundaryPolicy.transition(previousRole: .ambient, meetingActive: true)
+      )
+      XCTAssertEqual(
+        MeetingConversationBoundaryPolicy.committedRole(
+          previousRole: .ambient, transition: transition, rotationSucceeded: false),
+        .ambient
+      )
+      XCTAssertEqual(
+        MeetingConversationBoundaryPolicy.committedRole(
+          previousRole: .ambient, transition: transition, rotationSucceeded: true),
+        .meeting
+      )
+    }
+
     func testMeetingGateClosingWithSegmentsFinishesConversation() {
       XCTAssertTrue(
         MeetingConversationBoundaryPolicy.shouldFinishConversation(
-          mode: .onlyDuringMeetings,
+          mode: .onlyMeetings,
           meetingStateReady: true,
           shouldCapture: false,
           segmentCount: 12,
@@ -318,7 +433,7 @@ import XCTest
     func testMeetingGateClosingWithOnlyInMemorySegmentsFinishesConversation() {
       XCTAssertTrue(
         MeetingConversationBoundaryPolicy.shouldFinishConversation(
-          mode: .onlyDuringMeetings,
+          mode: .onlyMeetings,
           meetingStateReady: true,
           shouldCapture: false,
           segmentCount: 0,
@@ -330,7 +445,7 @@ import XCTest
     func testWaitingForFirstMeetingDoesNotFinishEmptySession() {
       XCTAssertFalse(
         MeetingConversationBoundaryPolicy.shouldFinishConversation(
-          mode: .onlyDuringMeetings,
+          mode: .onlyMeetings,
           meetingStateReady: true,
           shouldCapture: false,
           segmentCount: 0,
@@ -351,7 +466,7 @@ import XCTest
       )
       XCTAssertFalse(
         MeetingConversationBoundaryPolicy.shouldFinishConversation(
-          mode: .never,
+          mode: .off,
           meetingStateReady: true,
           shouldCapture: false,
           segmentCount: 12,
@@ -363,7 +478,7 @@ import XCTest
     func testActiveMeetingDoesNotFinishConversation() {
       XCTAssertFalse(
         MeetingConversationBoundaryPolicy.shouldFinishConversation(
-          mode: .onlyDuringMeetings,
+          mode: .onlyMeetings,
           meetingStateReady: true,
           shouldCapture: true,
           segmentCount: 12,
@@ -375,7 +490,7 @@ import XCTest
     func testUnreadyMeetingStateDoesNotFinishExistingConversation() {
       XCTAssertFalse(
         MeetingConversationBoundaryPolicy.shouldFinishConversation(
-          mode: .onlyDuringMeetings,
+          mode: .onlyMeetings,
           meetingStateReady: false,
           shouldCapture: false,
           segmentCount: 12,

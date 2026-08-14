@@ -7,7 +7,7 @@ import hashlib
 import time
 import jwt
 from typing import Any, Dict, Optional, cast
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse, urlsplit, urlunsplit
 from cryptography.hazmat.primitives import serialization
 from jwt.algorithms import RSAAlgorithm
 from fastapi import APIRouter, Request, HTTPException, Form
@@ -219,6 +219,20 @@ def _redirect_scheme(redirect_uri: Optional[str]) -> str:
     return (urlparse(redirect_uri).scheme or "missing").lower()[:64]
 
 
+def _build_callback_redirect_url(redirect_uri: str, code: str, state: Optional[str]) -> str:
+    """Append the one-time callback parameters without losing a URI fragment.
+
+    The value is rendered into the callback page's native link as well as used
+    by its automatic navigation. Rendering it in the HTML keeps the manual
+    fallback usable when a mobile browser blocks inline JavaScript or automatic
+    custom-scheme navigation.
+    """
+    parsed = urlsplit(redirect_uri)
+    callback_query = urlencode({"code": code, **({"state": state} if state else {})})
+    query = f"{parsed.query}&{callback_query}" if parsed.query else callback_query
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
+
+
 def _failure_class(error: Optional[object]) -> str:
     if error is None:
         return "none"
@@ -226,6 +240,26 @@ def _failure_class(error: Optional[object]) -> str:
         return f"http_{error.status_code}"
     value = str(error).strip().lower().replace(" ", "_")
     return value[:80] or error.__class__.__name__.lower()
+
+
+# RFC 6749 §4.1.2.1 error codes a provider may echo on the callback. The raw
+# `error` param is attacker-controlled free text and must never become a
+# Prometheus label value directly — that is unbounded cardinality on a
+# module-level (process-lifetime) metric registry.
+_OAUTH_ERROR_CODES = {
+    "access_denied",
+    "invalid_request",
+    "invalid_scope",
+    "unauthorized_client",
+    "unsupported_response_type",
+    "server_error",
+    "temporarily_unavailable",
+}
+
+
+def _bounded_provider_error(error: str) -> str:
+    normalized = error.strip().lower().replace(" ", "_")[:64]
+    return normalized if normalized in _OAUTH_ERROR_CODES else "provider_error_other"
 
 
 def _log_auth_event(
@@ -369,7 +403,7 @@ async def auth_callback_google(
             stage="provider_callback_received",
             outcome="failed",
             auth_flow_id=auth_flow_id,
-            failure_class=error,
+            failure_class=_bounded_provider_error(error),
             status_code=400,
         )
         raise HTTPException(status_code=400, detail=f"Auth error: {error}")
@@ -411,12 +445,13 @@ async def auth_callback_google(
     # The original ``redirect_uri`` was validated by ``_validate_redirect_uri`` at
     # ``/authorize`` time and cannot be overridden by the caller here.
     return templates.TemplateResponse(
+        request,
         "auth_callback.html",
         {
-            "request": request,
             "code": auth_code,
             "state": session_data['state'] or '',
             "redirect_uri": app_redirect_uri,
+            "redirect_url": _build_callback_redirect_url(app_redirect_uri, auth_code, session_data['state']),
         },
     )
 
@@ -458,7 +493,7 @@ async def auth_callback_apple_post(
             stage="provider_callback_received",
             outcome="failed",
             auth_flow_id=auth_flow_id,
-            failure_class=error,
+            failure_class=_bounded_provider_error(error),
             status_code=400,
         )
         raise HTTPException(status_code=400, detail=f"Auth error: {error}")
@@ -512,12 +547,13 @@ async def auth_callback_apple_post(
     # The original ``redirect_uri`` was validated by ``_validate_redirect_uri`` at
     # ``/authorize`` time and cannot be overridden by the caller here.
     return templates.TemplateResponse(
+        request,
         "auth_callback.html",
         {
-            "request": request,
             "code": auth_code,
             "state": session_data['state'] or '',
             "redirect_uri": app_redirect_uri,
+            "redirect_url": _build_callback_redirect_url(app_redirect_uri, auth_code, session_data['state']),
         },
     )
 

@@ -19,6 +19,7 @@ AUTO_LANE_PREFIX = 'omi:auto:'
 NEVER_LKG_FAILURE_CLASSES = frozenset(
     {
         FailureClass.CAPABILITY_MISMATCH,
+        FailureClass.PROVIDER_INVALID_REQUEST,
         FailureClass.INVALID_CONFIG,
         FailureClass.BYOK_AUTH,
         FailureClass.BYOK_QUOTA,
@@ -82,7 +83,10 @@ def resolve_lane(config: GatewayConfig, model: str) -> LaneConfig:
 def select_lkg_route_for_failure(
     resolved_route: ResolvedRoute, failure_class: FailureClass | str
 ) -> RouteArtifact | None:
-    if is_lkg_eligible(resolved_route.active_route, failure_class):
+    if (
+        resolved_route.active_route.route_artifact_id != resolved_route.last_known_good_route.route_artifact_id
+        and is_lkg_eligible(resolved_route.active_route, failure_class)
+    ):
         return resolved_route.last_known_good_route
     return None
 

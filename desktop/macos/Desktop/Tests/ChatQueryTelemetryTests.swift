@@ -13,9 +13,161 @@ private final class ChatTestGenerationBox {
 }
 
 final class ChatQueryTelemetryTests: XCTestCase {
+  /// A failed tool call used to emit nothing at all: the call site removed the
+  /// start time and then gated the event on `toolStatus == .completed`, so 30
+  /// days of `chat_tool_call_completed` carried only successes and tool
+  /// reliability could not be measured. Every terminal bridge status must now
+  /// map to a bounded outcome.
+  func testEveryTerminalBridgeStatusReportsABoundedToolOutcome() {
+    XCTAssertEqual(ChatTelemetryDimension.toolOutcome("failed"), "failed")
+    XCTAssertEqual(ChatTelemetryDimension.toolOutcome("cancelled"), "cancelled")
+    XCTAssertEqual(ChatTelemetryDimension.toolOutcome("interrupted"), "interrupted")
+    XCTAssertEqual(ChatTelemetryDimension.toolOutcome("completed"), "completed")
+
+    // Unknown adapter vocabulary must not leak or inflate successful calls.
+    XCTAssertEqual(ChatTelemetryDimension.toolOutcome("some_new_status"), "unknown")
+    XCTAssertEqual(ChatTelemetryDimension.toolOutcome(""), "unknown")
+  }
+
+  /// User Stop is not a tool defect. `ToolCallStatus` deliberately collapses
+  /// cancelled/interrupted into `.failed` for the UI, so the telemetry
+  /// dimension must stay independent of it or a Stop would count as a failure.
+  func testStopIsDistinguishableFromFailureEvenThoughBothMapToFailedStatus() {
+    XCTAssertEqual(ChatProvider.mapBridgeToolStatus("cancelled"), .failed)
+    XCTAssertEqual(ChatProvider.mapBridgeToolStatus("interrupted"), .failed)
+    XCTAssertEqual(ChatProvider.mapBridgeToolStatus("failed"), .failed)
+
+    XCTAssertNotEqual(
+      ChatTelemetryDimension.toolOutcome("cancelled"),
+      ChatTelemetryDimension.toolOutcome("failed"))
+    XCTAssertNotEqual(
+      ChatTelemetryDimension.toolOutcome("interrupted"),
+      ChatTelemetryDimension.toolOutcome("failed"))
+  }
+
   func testKernelContextTimeoutDoesNotInterruptAnUnstartedAgentQuery() {
     XCTAssertFalse(ChatProvider.shouldInterruptTimedOutAgentQuery(queryStarted: false))
     XCTAssertTrue(ChatProvider.shouldInterruptTimedOutAgentQuery(queryStarted: true))
+  }
+
+  func testFailedPayloadCarriesBoundedErrorDetail() {
+    let detail = ChatQueryErrorDetail.from(
+      BridgeError.agentError("400 Your credit balance is too low to access the Anthropic API."))
+    let event = ChatQueryTelemetryEvent.failed(
+      ChatQueryTelemetryContext(attemptId: "attempt-detail", surface: "main_chat", harness: "acp"),
+      durationMs: 1200,
+      errorClass: .agentError,
+      partialResponse: false,
+      detail: detail
+    )
+    let properties = event.analyticsPayload.properties
+    XCTAssertEqual(properties["error_code"] as? String, "provider_billing_exhausted")
+    XCTAssertEqual(properties["retryable"] as? Bool, false)
+    // Bounded dimensions only: the raw provider text must never reach analytics.
+    XCTAssertFalse(
+      String(describing: properties).contains("credit balance"),
+      "raw exception text leaked into analytics properties")
+  }
+
+  func testRuntimeFailureDetailCarriesDaemonTaxonomy() {
+    let failure = AgentRuntimeFailure(
+      code: "adapter_execution_failed",
+      failureCode: .authentication,
+      userMessage: "Authentication required",
+      source: "adapter_execution",
+      adapterId: "openclaw",
+      provider: "anthropic",
+      retryable: false
+    )
+    let detail = ChatQueryErrorDetail.from(BridgeError.agentRuntimeFailure(failure))
+    XCTAssertEqual(detail?.errorCode, "authentication")
+    XCTAssertEqual(detail?.failureCode, "adapter_execution_failed")
+    XCTAssertEqual(detail?.failureSource, "adapter_execution")
+    XCTAssertEqual(detail?.adapterId, "openclaw")
+    XCTAssertEqual(detail?.retryable, false)
+  }
+
+  func testWorkerRecoveryTelemetryIsBoundedAndExplainsTheNextSendContract() {
+    let failure = AgentRuntimeFailure(
+      code: "adapter_execution_failed",
+      userMessage: "Agent run failed",
+      technicalMessage: "private prompt /Users/person/secret.txt",
+      source: "adapter_execution",
+      adapterId: "pi-mono",
+      retryable: true,
+      recoveryAction: "worker_recycled",
+      recoveryOutcome: "recovered",
+      retryDisposition: "next_send"
+    )
+    let event = ChatQueryTelemetryEvent.failed(
+      ChatQueryTelemetryContext(attemptId: "attempt-recycled", surface: "main_chat", harness: "piMono"),
+      durationMs: 400,
+      errorClass: .agentError,
+      partialResponse: false,
+      detail: .from(BridgeError.agentRuntimeFailure(failure))
+    )
+    let properties = event.analyticsPayload.properties
+    XCTAssertEqual(properties["recovery_action"] as? String, "worker_recycled")
+    XCTAssertEqual(properties["recovery_outcome"] as? String, "recovered")
+    XCTAssertEqual(properties["retry_disposition"] as? String, "next_send")
+    XCTAssertFalse(String(describing: properties).contains("/Users/person"))
+    XCTAssertFalse(String(describing: properties).contains("private prompt"))
+  }
+
+  func testUnknownDaemonAuthFailureReportsClassifierCodeAndIsNotRetryable() {
+    let failure = AgentRuntimeFailure(
+      code: "adapter_execution_failed",
+      failureCode: .unknown,
+      userMessage: "Authentication required",
+      source: "adapter_execution",
+      adapterId: "pi-mono",
+      retryable: true
+    )
+    let error = BridgeError.agentRuntimeFailure(failure)
+    let detail = ChatQueryErrorDetail.from(error)
+
+    XCTAssertEqual(detail?.errorCode, "provider_auth_expired")
+    XCTAssertEqual(detail?.retryable, false)
+    XCTAssertEqual(ChatQueryFailureDisposition.classify(error), .failed(.authentication))
+  }
+
+  func testRecycledWorkerHTTP402ReportsBillingNotUnknownRuntime() {
+    let failure = AgentRuntimeFailure(
+      code: "adapter_execution_failed",
+      userMessage: "The local agent reset its session after an error. Send your message again.",
+      technicalMessage: "HTTP 402 status code (no body)",
+      source: "adapter_execution",
+      adapterId: "pi-mono",
+      retryable: true,
+      recoveryAction: "worker_recycled",
+      recoveryOutcome: "recovered",
+      retryDisposition: "next_send"
+    )
+    let error = BridgeError.agentRuntimeFailure(failure)
+    let detail = ChatQueryErrorDetail.from(error)
+
+    XCTAssertEqual(detail?.errorCode, "provider_billing_exhausted")
+    XCTAssertEqual(detail?.retryable, false)
+    XCTAssertEqual(detail?.recoveryAction, "worker_recycled")
+    XCTAssertEqual(detail?.adapterId, "pi-mono")
+    XCTAssertEqual(ChatQueryFailureDisposition.classify(error), .failed(.quota))
+  }
+
+  func testRuntimeDetailedFailureCodeMustBeInTheAnalyticsAllowlist() {
+    let failure = AgentRuntimeFailure(
+      code: "provider_error_/Users/person/secret.txt",
+      userMessage: "Agent run failed"
+    )
+    let event = ChatQueryTelemetryEvent.failed(
+      ChatQueryTelemetryContext(attemptId: "attempt-private-code", surface: "main_chat", harness: "piMono"),
+      durationMs: 100,
+      errorClass: .agentRuntime,
+      partialResponse: false,
+      detail: .from(BridgeError.agentRuntimeFailure(failure))
+    )
+    let properties = event.analyticsPayload.properties
+    XCTAssertNil(properties["failure_code"])
+    XCTAssertFalse(String(describing: properties).contains("/Users/person"))
   }
 
   func testAnalyticsPayloadUsesTypedAllowlist() {
@@ -27,7 +179,8 @@ final class ChatQueryTelemetryTests: XCTestCase {
       ),
       durationMs: 900,
       errorClass: .timeout,
-      partialResponse: true
+      partialResponse: true,
+      detail: nil
     )
 
     let payload = event.analyticsPayload
@@ -36,7 +189,7 @@ final class ChatQueryTelemetryTests: XCTestCase {
       Set(payload.properties.keys),
       Set([
         "attempt_id", "surface", "harness", "duration_ms", "error_class", "error",
-        "partial_response", "telemetry_schema_version", "input_length_bucket",
+        "partial_response", "watchdog_fired", "telemetry_schema_version", "input_length_bucket",
         "attachment_count", "has_image",
       ])
     )
@@ -226,6 +379,34 @@ final class ChatQueryTelemetryTests: XCTestCase {
     let ids = ChatProvider.messageIds(forAttemptId: "attempt-123")
     XCTAssertEqual(ids.user, "attempt-123")
     XCTAssertEqual(ids.assistant, "attempt-123-assistant")
+  }
+
+  func testQuestionInteractionContinuityMatchesKernelOwnerConversationScope() {
+    let continuityKey = ChatProvider.questionInteractionContinuityKey(
+      ownerID: "alice",
+      conversationID: "conv_442a0a6004964766830774eb406562e4",
+      questionID: "cold-start:0:step:1",
+      optionID: "cold-start:0:outcome:progress"
+    )
+
+    XCTAssertEqual(continuityKey, "qri_918fa0e3102b91249755bfc291dfb813")
+    XCTAssertEqual(
+      ChatProvider.messageIds(forAttemptId: continuityKey).user,
+      "turn_61f833a2129a50b2"
+    )
+    XCTAssertEqual(
+      ChatProvider.messageIds(forAttemptId: continuityKey).assistant,
+      "turn_c7ec848ab1718b5f"
+    )
+    XCTAssertNotEqual(
+      continuityKey,
+      ChatProvider.questionInteractionContinuityKey(
+        ownerID: "bob",
+        conversationID: "conv_442a0a6004964766830774eb406562e4",
+        questionID: "cold-start:0:step:1",
+        optionID: "cold-start:0:outcome:progress"
+      )
+    )
   }
 
   func testStagedImageAttachmentIsReportedAsImageInput() {
@@ -533,7 +714,7 @@ final class ChatQueryTelemetryTests: XCTestCase {
       eventSink: { browserEvents.append($0) }
     )
     XCTAssertTrue(browserAttempt.finish(stopReason: .browserExtensionMissing))
-    guard case .failed(_, _, let errorClass, _) = browserEvents.last else {
+    guard case .failed(_, _, let errorClass, _, _, _) = browserEvents.last else {
       return XCTFail("expected browser precondition failure")
     }
     XCTAssertEqual(errorClass, .browserExtensionMissing)
@@ -550,5 +731,55 @@ final class ChatQueryTelemetryTests: XCTestCase {
       return XCTFail("expected superseded cancellation")
     }
     XCTAssertEqual(reason, .superseded)
+  }
+
+  // T5: auth-blocked turns classify as authentication with session adapter + disposition.
+  @MainActor
+  func testAuthenticationFailureTelemetryIncludesSessionAdapterAndDisposition() {
+    var events: [ChatQueryTelemetryEvent] = []
+    let attempt = ChatQueryTelemetryAttempt(
+      attemptId: "attempt-auth-blocked",
+      surface: "main_chat",
+      harness: "piMono",
+      bridgeModePreference: "piMono",
+      sessionAdapterId: "acp",
+      eventSink: { events.append($0) }
+    )
+
+    XCTAssertTrue(attempt.fail(errorClass: .authentication))
+    guard let terminal = events.last,
+      case .failed(_, _, let errorClass, _, _, let watchdogFired) = terminal
+    else {
+      return XCTFail("expected failed terminal event")
+    }
+    XCTAssertEqual(errorClass, .authentication)
+    XCTAssertFalse(watchdogFired)
+
+    let payload = terminal.analyticsPayload
+    XCTAssertEqual(payload.properties["error_class"] as? String, "authentication")
+    XCTAssertEqual(payload.properties["session_adapter_id"] as? String, "acp")
+    XCTAssertEqual(payload.properties["harness"] as? String, "piMono")
+    XCTAssertEqual(payload.properties["bridge_mode_preference"] as? String, "piMono")
+    XCTAssertEqual(payload.properties["turn_disposition"] as? String, "auth_blocked")
+    XCTAssertEqual(payload.properties["root_cause"] as? String, "provider_claude")
+    XCTAssertEqual(payload.properties["adapter_harness_mismatch"] as? Bool, true)
+    XCTAssertEqual(payload.properties["watchdog_fired"] as? Bool, false)
+  }
+
+  @MainActor
+  func testRuntimeAuthenticationFailureClassifiesAsAuthentication() {
+    let failure = AgentRuntimeFailure(
+      code: "provider_auth_required",
+      failureCode: .authentication,
+      userMessage: "Claude sign-in is required to continue this chat."
+    )
+    let disposition = ChatQueryFailureDisposition.classify(
+      BridgeError.agentRuntimeFailure(failure)
+    )
+    guard case .failed(let errorClass) = disposition else {
+      return XCTFail("expected failed disposition")
+    }
+    XCTAssertEqual(errorClass, .authentication)
+    XCTAssertTrue(BridgeError.agentRuntimeFailure(failure).isSessionAuthenticationFailure)
   }
 }

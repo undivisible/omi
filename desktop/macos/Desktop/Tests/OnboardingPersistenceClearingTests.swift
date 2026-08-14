@@ -35,6 +35,12 @@ final class OnboardingPersistenceClearingTests: XCTestCase {
       "hasSeenRewindIntro",
       "hasTriggeredAccessibility",
       "hasTriggeredBluetooth",
+      // Second Brain onboarding keys — the redesign added these but left them out
+      // of the shared list, leaking the prior user's resume step + role to the
+      // next account on the same Mac.
+      "sbOnboardingResumeStep",
+      "sbOnboardingShortcutsCompleted",
+      "onboardingRole",
     ]
     for key in required {
       XCTAssertTrue(
@@ -56,7 +62,7 @@ final class OnboardingPersistenceClearingTests: XCTestCase {
     // A merge reintroducing a hand-rolled removeObject list regresses silently.
     // omi-test-quality: source-inspection -- static contract: signOut() must use the shared clearing helpers
     let source = try String(contentsOf: sourceURL, encoding: .utf8)
-    let signOutStart = try XCTUnwrap(source.range(of: "func signOut() async throws {"))
+    let signOutStart = try XCTUnwrap(source.range(of: "func signOut("))
     let tail = source[signOutStart.lowerBound...]
     XCTAssertNotNil(
       tail.range(of: "OnboardingFlow.clearPersistedState()"),
@@ -88,5 +94,11 @@ final class OnboardingPersistenceClearingTests: XCTestCase {
     XCTAssertNil(
       tail.range(of: "removeObject(forKey: \"onboardingStep\")"),
       "resetOnboardingAndRestart() must not keep a hand-rolled onboarding key list")
+    XCTAssertNil(
+      tail.range(of: "deleteKnowledgeGraph"),
+      "resetting onboarding must not delete the user's server knowledge graph")
+    XCTAssertNil(
+      tail.range(of: "KnowledgeGraphStorage.shared.clearAll"),
+      "resetting onboarding must not clear the user's local knowledge graph")
   }
 }

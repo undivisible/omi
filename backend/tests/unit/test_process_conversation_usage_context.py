@@ -21,8 +21,13 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
+from fastapi import HTTPException
+import httpx
+import openai
 import pytest
 
+from llm_gateway.gateway.errors import GatewayCredentialFailureError, GatewayProviderFailureError
+from llm_gateway.gateway.schemas import FailureClass
 from models.conversation import Conversation, CreateConversation
 from models.conversation_enums import ConversationSource, ConversationStatus
 from models.structured import Structured
@@ -137,8 +142,8 @@ def _build_fakes() -> dict[str, ModuleType]:
     add("utils.task_intelligence", task_intelligence)
     conversation_capture = AutoMockModule("utils.task_intelligence.conversation_capture")
     conversation_capture.capture_enabled = MagicMock(return_value=False)
-    conversation_capture.process_before_legacy = MagicMock(return_value=False)
-    conversation_capture.canonical_fields = MagicMock(return_value={})
+    conversation_capture.process_conversation_before_legacy = MagicMock(return_value=False)
+    conversation_capture.canonical_conversation_fields = MagicMock(return_value={})
     conversation_capture.legacy_document_ids = MagicMock(return_value=None)
     conversation_capture.reconcile_after_legacy = MagicMock()
     add("utils.task_intelligence.conversation_capture", conversation_capture)
@@ -277,7 +282,12 @@ def _build_fakes() -> dict[str, ModuleType]:
     )
 
     llm_memories = add("utils.llm.memories", AutoMockModule("utils.llm.memories"))
-    for attr in ["resolve_memory_conflict", "extract_memories_from_text", "new_memories_extractor"]:
+    for attr in [
+        "resolve_memory_conflict",
+        "extract_canonical_l1_memory_candidates",
+        "extract_memories_from_text",
+        "new_memories_extractor",
+    ]:
         setattr(llm_memories, attr, MagicMock())
 
     llm_external = add("utils.llm.external_integrations", AutoMockModule("utils.llm.external_integrations"))
@@ -339,10 +349,6 @@ def _build_fakes() -> dict[str, ModuleType]:
     memory_system = ModuleType("utils.memory.memory_system")
     memory_system.MemorySystem = _MemorySystem
     add("utils.memory.memory_system", memory_system)
-
-    memory_system_pin = ModuleType("utils.memory.memory_system_pin")
-    memory_system_pin.memory_system_request_scope = MagicMock()
-    add("utils.memory.memory_system_pin", memory_system_pin)
 
     canonical_memory_adapter = ModuleType("utils.memory.canonical_memory_adapter")
     canonical_memory_adapter.extraction_memory_id = MagicMock()
@@ -426,6 +432,66 @@ def test_fenced_completion_submits_no_derived_work(monkeypatch):
     create_audio_files.assert_not_called()
     update_conversation.assert_not_called()
     assert observed_persistence == [False]
+
+
+def test_deferred_derived_effects_emit_nothing_until_runner_invoked(monkeypatch):
+    """#10468 r5: with defer_derived_effects=True, process_conversation persists
+    the result and hands back the entire derived-effect bundle as a deferred
+    runner, emitting zero side effects inline.  Only invoking the runner (after
+    the durable finalizer has transactionally claimed ownership) emits calendar,
+    usage/app, vector, action/goal, audio, webhook, and memory work.  A losing
+    claim that never invokes the runner is a no-side-effect outcome."""
+    input_conversation = MagicMock()
+    input_conversation.source = "omi"
+    input_conversation.get_person_ids.return_value = []
+
+    completed_conversation = MagicMock()
+    completed_conversation.id = "conversation-deferred"
+    completed_conversation.dict.return_value = {"id": "conversation-deferred", "status": "completed"}
+    completed_conversation.structured = None  # skip analytics counting
+    completed_conversation.apps_results = []
+    completed_conversation.suggested_summarization_apps = []
+    completed_conversation.private_cloud_sync_enabled = False
+    completed_conversation.folder_id = "existing-folder"  # skip folder assignment
+
+    persistence = MagicMock(return_value=True)
+    submit = MagicMock()
+    trigger_apps = MagicMock()
+    create_audio_files = MagicMock()
+    update_conversation = MagicMock()
+    extract_memories = MagicMock()
+    captured: list = []
+    monkeypatch.setattr(process_conversation, "_get_structured", lambda *args, **kwargs: (MagicMock(), False))
+    monkeypatch.setattr(process_conversation, "_get_conversation_obj", lambda *args, **kwargs: completed_conversation)
+    monkeypatch.setattr(process_conversation.lifecycle_service, "persist_processed_conversation", persistence)
+    monkeypatch.setattr(process_conversation, "submit_with_context", submit)
+    monkeypatch.setattr(process_conversation, "_trigger_apps", trigger_apps)
+    monkeypatch.setattr(process_conversation.conversations_db, "create_audio_files_from_chunks", create_audio_files)
+    monkeypatch.setattr(process_conversation.conversations_db, "update_conversation", update_conversation)
+    monkeypatch.setattr(process_conversation, "_extract_memories", extract_memories)
+
+    result = process_conversation.process_conversation(
+        "uid",
+        "en",
+        input_conversation,
+        defer_derived_effects=True,
+        derived_effects_observer=captured.append,
+    )
+
+    assert result is completed_conversation
+    persistence.assert_called_once()
+    # ZERO side effects emitted inline — the entire bundle is deferred.
+    submit.assert_not_called()
+    trigger_apps.assert_not_called()
+    create_audio_files.assert_not_called()
+    update_conversation.assert_not_called()
+    extract_memories.assert_not_called()
+    assert len(captured) == 1, "exactly one derived-effects runner must be captured"
+
+    # Invoking the runner (ownership proven) emits every derived effect.
+    captured[0]()
+    trigger_apps.assert_called_once()
+    assert submit.call_count >= 4  # vectors, memory, action items, goals, webhook
 
 
 def test_fresh_creation_uses_the_explicit_completed_lifecycle_owner(monkeypatch):
@@ -548,6 +614,146 @@ def test_track_usage_context_resets_on_exception():
             raise RuntimeError("boom")
 
     assert usage_tracker.get_current_context() is None
+
+
+def test_byok_rate_limit_reaches_conversation_composition_as_safe_actionable_429(monkeypatch, caplog):
+    """The composition boundary must retain the gateway's typed BYOK outcome."""
+    sensitive_provider_body = 'provider-body-with-api-key-and-transcript'
+    conversation = MagicMock()
+    conversation.source = ConversationSource.phone
+    conversation.get_transcript.return_value = 'a conversation transcript'
+    conversation.photos = []
+    conversation.external_data = None
+    conversation.started_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
+    conversation.finished_at = datetime(2026, 8, 4, 0, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(process_conversation, 'should_discard_conversation', MagicMock(return_value=False))
+    monkeypatch.setattr(
+        process_conversation,
+        'get_transcript_structure',
+        MagicMock(
+            side_effect=GatewayCredentialFailureError(
+                sensitive_provider_body,
+                failure_class=FailureClass.BYOK_RATE_LIMIT,
+            )
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        process_conversation._get_structured('uid', 'en', conversation)
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == {
+        'code': 'byok_rate_limit',
+        'message': 'The configured provider account is rate limited. Please retry later or check its limits.',
+    }
+    assert sensitive_provider_body not in str(exc_info.value.detail)
+    assert sensitive_provider_body not in caplog.text
+
+
+def test_unwrapped_openai_byok_rate_limit_reaches_conversation_composition(monkeypatch, caplog):
+    """The production SDK shape must preserve the actionable BYOK response."""
+    sensitive_provider_body = 'provider-body-with-api-key-and-transcript'
+    conversation = MagicMock()
+    conversation.source = ConversationSource.phone
+    conversation.get_transcript.return_value = 'a conversation transcript'
+    conversation.photos = []
+    conversation.external_data = None
+    conversation.started_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
+    conversation.finished_at = datetime(2026, 8, 4, 0, 1, tzinfo=timezone.utc)
+
+    sdk_error = openai.RateLimitError(
+        sensitive_provider_body,
+        response=httpx.Response(429, request=httpx.Request('POST', 'http://gateway.test/v1/chat/completions')),
+        body={
+            'code': 'credential_failure',
+            'failure_class': 'byok_rate_limit',
+            'message': sensitive_provider_body,
+        },
+    )
+    monkeypatch.setattr(process_conversation, 'should_discard_conversation', MagicMock(return_value=False))
+    monkeypatch.setattr(process_conversation, 'get_transcript_structure', MagicMock(side_effect=sdk_error))
+
+    with pytest.raises(HTTPException) as exc_info:
+        process_conversation._get_structured('uid', 'en', conversation)
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == {
+        'code': 'byok_rate_limit',
+        'message': 'The configured provider account is rate limited. Please retry later or check its limits.',
+    }
+    assert sensitive_provider_body not in str(exc_info.value.detail)
+    assert sensitive_provider_body not in caplog.text
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        GatewayCredentialFailureError('provider-body-with-api-key', failure_class=FailureClass.BYOK_QUOTA),
+        GatewayProviderFailureError('provider-body-with-transcript', failure_class=FailureClass.PROVIDER_429_OMI_PAID),
+    ],
+)
+def test_non_byok_rate_limit_failures_keep_generic_processing_error(monkeypatch, caplog, error):
+    conversation = MagicMock()
+    conversation.source = ConversationSource.phone
+    conversation.get_transcript.return_value = 'a conversation transcript'
+    conversation.photos = []
+    conversation.external_data = None
+    conversation.started_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
+    conversation.finished_at = datetime(2026, 8, 4, 0, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(process_conversation, 'should_discard_conversation', MagicMock(return_value=False))
+    monkeypatch.setattr(process_conversation, 'get_transcript_structure', MagicMock(side_effect=error))
+
+    with pytest.raises(HTTPException) as exc_info:
+        process_conversation._get_structured('uid', 'en', conversation)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == 'Error processing conversation, please try again later'
+    assert type(error).__name__ in caplog.text
+    assert str(error) not in caplog.text
+
+
+def test_byok_rate_limit_in_action_item_extraction_reaches_composition_boundary(monkeypatch):
+    """A BYOK rate-limit during action-item extraction must not be swallowed by extract_action_items's catch-all.
+
+    extract_action_items catches every exception and returns [] by default. A typed
+    BYOK rate-limit must escape so the composition boundary (_get_structured) maps
+    it to the actionable 429 contract instead of persisting an incomplete conversation.
+    """
+    conversation = MagicMock()
+    conversation.source = ConversationSource.phone
+    conversation.get_transcript.return_value = 'a conversation transcript'
+    conversation.photos = []
+    conversation.external_data = None
+    conversation.started_at = datetime(2026, 8, 4, tzinfo=timezone.utc)
+    conversation.finished_at = datetime(2026, 8, 4, 0, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(process_conversation, 'should_discard_conversation', MagicMock(return_value=False))
+    monkeypatch.setattr(
+        process_conversation,
+        'get_transcript_structure',
+        MagicMock(return_value=Structured(emoji='🧠', title='Test', overview='Overview', action_items=[])),
+    )
+    monkeypatch.setattr(
+        process_conversation,
+        'extract_action_items',
+        MagicMock(
+            side_effect=GatewayCredentialFailureError(
+                'rate limited',
+                failure_class=FailureClass.BYOK_RATE_LIMIT,
+            )
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        process_conversation._get_structured('uid', 'en', conversation)
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == {
+        'code': 'byok_rate_limit',
+        'message': 'The configured provider account is rate limited. Please retry later or check its limits.',
+    }
 
 
 def test_no_umbrella_conversation_processing_tracking():
@@ -741,14 +947,59 @@ def test_action_items_skipped_on_discard():
     extract_mock.assert_not_called()
 
 
+def test_conversation_action_item_auto_sync_uses_postprocess_pool(monkeypatch):
+    action_item = MagicMock()
+    action_item.description = 'Send the forecast'
+    action_item.completed = False
+    action_item.created_at = None
+    action_item.updated_at = None
+    action_item.due_at = None
+    action_item.completed_at = None
+
+    conversation = MagicMock()
+    conversation.id = 'conversation-1'
+    conversation.is_locked = False
+    conversation.structured.action_items = [action_item]
+
+    monkeypatch.setattr(
+        process_conversation.conversation_capture, 'process_conversation_before_legacy', lambda *args: False
+    )
+    monkeypatch.setattr(process_conversation.conversation_capture, 'canonical_conversation_fields', lambda *args: {})
+    monkeypatch.setattr(process_conversation.conversation_capture, 'legacy_document_ids', lambda *args: None)
+    monkeypatch.setattr(process_conversation.conversation_capture, 'reconcile_after_legacy', lambda *args: None)
+    monkeypatch.setattr(process_conversation.action_items_db, 'get_action_items_by_conversation', lambda *args: [])
+    monkeypatch.setattr(
+        process_conversation.action_items_db, 'delete_action_items_for_conversation', lambda *args: None
+    )
+    monkeypatch.setattr(
+        process_conversation.action_items_db,
+        'create_action_items_batch',
+        lambda *args, **kwargs: ['task-1'],
+    )
+    monkeypatch.setattr(process_conversation, 'upsert_action_item_vectors_batch', lambda *args, **kwargs: None)
+    submitted_to = []
+    monkeypatch.setattr(
+        process_conversation,
+        'submit_with_context',
+        lambda executor, function: submitted_to.append(executor),
+    )
+
+    process_conversation._save_action_items('user-1', conversation)
+
+    assert submitted_to == [process_conversation.postprocess_executor], (
+        'conversation task auto-sync must run on postprocess_executor so its Firestore '
+        'children can acquire db_executor workers'
+    )
+
+
 def test_llm_calls_use_omi_qos_tier_system():
     """Verify all LLM functions use get_llm() with correct feature keys and cache_key param."""
     conv_proc_path = Path(__file__).resolve().parent.parent.parent / "utils" / "llm" / "conversation_processing.py"
     conv_proc_source = conv_proc_path.read_text(encoding="utf-8")
 
-    # get_transcript_structure should use get_llm('conv_structure', cache_key=...)
+    # get_transcript_structure should use the conv_structure QoS lane.
     struct_match = re.search(
-        r'def get_transcript_structure.*?chain = prompt \| get_llm\([\'"](\w+)[\'"]\s*,\s*cache_key=',
+        r'def get_transcript_structure.*?get_llm\([\'"](\w+)[\'"]\s*,\s*cache_key=',
         conv_proc_source,
         re.DOTALL,
     )
@@ -757,9 +1008,9 @@ def test_llm_calls_use_omi_qos_tier_system():
         struct_match.group(1) == "conv_structure"
     ), f"Expected get_llm('conv_structure') for structure, got {struct_match.group(1)}"
 
-    # get_app_result should use get_llm('conv_app_result', cache_key=...)
+    # get_app_result should use the conv_app_result QoS lane.
     app_match = re.search(
-        r'def get_app_result.*?response = get_llm\([\'"](\w+)[\'"]\s*,\s*cache_key=',
+        r'def get_app_result.*?get_llm\([\'"](\w+)[\'"]\s*,\s*cache_key=',
         conv_proc_source,
         re.DOTALL,
     )
@@ -768,9 +1019,9 @@ def test_llm_calls_use_omi_qos_tier_system():
         app_match.group(1) == "conv_app_result"
     ), f"Expected get_llm('conv_app_result') for app result, got {app_match.group(1)}"
 
-    # extract_action_items should use get_llm('conv_action_items', cache_key=...)
+    # extract_action_items should use the conv_action_items QoS lane.
     action_match = re.search(
-        r'def extract_action_items.*?chain = prompt \| get_llm\([\'"](\w+)[\'"]\s*,\s*cache_key=',
+        r'def extract_action_items.*?get_llm\([\'"](\w+)[\'"]\s*,\s*cache_key=',
         conv_proc_source,
         re.DOTALL,
     )
@@ -780,9 +1031,9 @@ def test_llm_calls_use_omi_qos_tier_system():
     ), f"Expected get_llm('conv_action_items') for action items, got {action_match.group(1)}"
 
     # Verify cache keys are passed through get_llm's cache_key param (model-safe)
-    assert "cache_key='omi-extract-actions'" in conv_proc_source, "Missing cache_key for action items"
-    assert "cache_key='omi-transcript-structure'" in conv_proc_source, "Missing cache_key for structure"
-    assert "cache_key='omi-app-result'" in conv_proc_source, "Missing cache_key for app result"
+    assert "_cache_bucket_key('omi-extract-actions')" in conv_proc_source, "Missing cache key for action items"
+    assert "_cache_bucket_key('omi-transcript-structure')" in conv_proc_source, "Missing cache key for structure"
+    assert "else 'omi-app-result'" in conv_proc_source, "Missing cache_key for app result"
     assert "cache_key='omi-daily-summary'" in conv_proc_source, "Missing cache_key for daily summary"
 
 
@@ -811,17 +1062,18 @@ def test_all_callsites_use_get_llm():
         kg_calls.count('knowledge_graph') == 2
     ), f"Expected 2 get_llm('knowledge_graph') calls, got {kg_calls.count('knowledge_graph')}"
 
-    # memories.py: 5 callsites (memories x2, learnings x1, memory_category x1, memory_conflict x1)
+    # memories.py: 6 callsites (memories x3 incl. the memory-log extract SSOT, learnings x1,
+    # memory_category x1, memory_conflict x1)
     mem_source = (backend_dir / "utils" / "llm" / "memories.py").read_text(encoding="utf-8")
     mem_calls = re.findall(r"get_llm\('(\w+)'", mem_source)
-    assert mem_calls.count('memories') == 2, f"Expected 2 get_llm('memories') calls, got {mem_calls.count('memories')}"
+    assert mem_calls.count('memories') == 3, f"Expected 3 get_llm('memories') calls, got {mem_calls.count('memories')}"
     assert 'learnings' in mem_calls, "Missing get_llm('learnings') in memories.py"
     assert 'memory_category' in mem_calls, "Missing get_llm('memory_category') in memories.py"
     assert 'memory_conflict' in mem_calls, "Missing get_llm('memory_conflict') in memories.py"
 
-    # Total: 9 + 2 + 5 = 16 callsites
+    # Total: 9 + 2 + 6 = 17 callsites
     total = len(conv_proc_calls) + len(kg_calls) + len(mem_calls)
-    assert total == 16, f"Expected 16 total get_llm() callsites, got {total}"
+    assert total == 17, f"Expected 17 total get_llm() callsites, got {total}"
 
 
 def test_no_direct_llm_instance_usage_in_wired_files():
@@ -1103,3 +1355,56 @@ def test_app_summary_results_reach_the_database(monkeypatch):
     assert results[0]['app_id'] == 'app-1'
     assert results[0]['content'] == 'APP SUMMARY'
     assert written.get('suggested_summarization_apps') == ['app-1']
+
+
+def test_dedup_candidates_exclude_own_and_merge_source_items():
+    """Regression: on reprocess/merge, the conversation's own previous action
+    items (and the merge sources') came back as dedup candidates — the LLM
+    suppressed re-extracting them and the save step then deleted them, so
+    tasks silently vanished. Items from the conversation being processed or
+    its merge sources must never be dedup candidates."""
+    import sys
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    now = datetime.now(timezone.utc)
+    items = [
+        {'id': 'own', 'conversation_id': 'conv-1', 'completed': False, 'updated_at': now},
+        {'id': 'merged', 'conversation_id': 'src-conv', 'completed': False, 'updated_at': now},
+        {'id': 'unrelated', 'conversation_id': 'other-conv', 'completed': False, 'updated_at': now},
+    ]
+    similar = [{'action_item_id': item['id'], 'score': 0.9} for item in items]
+    action_items_mod = sys.modules["database.action_items"]
+    action_items_mod.get_action_items_by_ids = MagicMock(return_value=items)
+
+    conversation = SimpleNamespace(
+        id='conv-1',
+        external_data={'merge_metadata': {'source_conversation_ids': ['src-conv']}},
+    )
+    structured = SimpleNamespace(overview='discussed follow-ups')
+
+    with patch.object(process_conversation, "find_similar_action_items", MagicMock(return_value=similar)):
+        eligible = process_conversation._fetch_dedup_candidates('user-1', structured, conversation)
+
+    assert [item['id'] for item in eligible] == ['unrelated']
+
+
+def test_dedup_candidates_unchanged_without_conversation_context():
+    """Without a conversation (new-conversation path has a fresh id), all open
+    recent items remain candidates."""
+    import sys
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    now = datetime.now(timezone.utc)
+    items = [{'id': 'open-item', 'conversation_id': 'other-conv', 'completed': False, 'updated_at': now}]
+    action_items_mod = sys.modules["database.action_items"]
+    action_items_mod.get_action_items_by_ids = MagicMock(return_value=items)
+
+    similar = [{'action_item_id': 'open-item', 'score': 0.9}]
+    structured = SimpleNamespace(overview='discussed follow-ups')
+
+    with patch.object(process_conversation, "find_similar_action_items", MagicMock(return_value=similar)):
+        eligible = process_conversation._fetch_dedup_candidates('user-1', structured)
+
+    assert [item['id'] for item in eligible] == ['open-item']

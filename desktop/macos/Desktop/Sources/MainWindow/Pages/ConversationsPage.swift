@@ -1,34 +1,12 @@
-import Combine
 import OmiTheme
 import SwiftUI
-
-// MARK: - Search Debouncer
-
-/// Debounces search queries to avoid excessive API calls
-class SearchDebouncer: ObservableObject {
-  /// The input query (set immediately when user types)
-  @Published var inputQuery: String = ""
-  /// The debounced query (updated 250ms after user stops typing)
-  @Published var debouncedQuery: String = ""
-  private var cancellables = Set<AnyCancellable>()
-
-  init() {
-    // Observe input and debounce to output
-    $inputQuery
-      .debounce(for: .milliseconds(250), scheduler: DispatchQueue.main)
-      .removeDuplicates()
-      .sink { [weak self] value in
-        self?.debouncedQuery = value
-      }
-      .store(in: &cancellables)
-  }
-}
 
 // MARK: - Conversations Page
 
 struct ConversationsPage: View {
   @ObservedObject var appState: AppState
   @Binding var selectedConversation: ServerConversation?
+  @ObservedObject private var automation = ConversationDetailAutomationState.shared
 
   /// When true, renders without internal ScrollViews (for embedding in an outer ScrollView)
   var embedded: Bool = false
@@ -36,12 +14,20 @@ struct ConversationsPage: View {
   // Compact view mode - persisted preference
   @AppStorage("conversationsCompactView") private var isCompactView = true
 
+  // Listening mode — used only to decide whether the manual "Start Recording"
+  // affordance is meaningful (see startRecordingButton gating).
+  @AppStorage(AssistantSettings.audioRecordingModeDefaultsKey) private var audioRecordingModeRaw =
+    AssistantSettings.AudioRecordingMode.onlyMeetings.rawValue
+  private var audioRecordingMode: AssistantSettings.AudioRecordingMode {
+    CaptureListeningLogic.audioRecordingMode(raw: audioRecordingModeRaw)
+  }
+
   // Search state
   @State private var searchQuery: String = ""
   @State private var searchResults: [ServerConversation] = []
   @State private var isSearching: Bool = false
   @State private var searchError: String? = nil
-  @StateObject private var searchDebouncer = SearchDebouncer()
+  @StateObject private var searchCoordinator = DebouncedSearchCoordinator()
 
   // Date picker state
   @State private var showDatePicker: Bool = false
@@ -61,6 +47,9 @@ struct ConversationsPage: View {
   @State private var showMergeConfirmation: Bool = false
   @State private var isMerging: Bool = false
   @State private var mergeError: String? = nil
+
+  // Full-screen live transcript overlay
+  @State private var isLiveTranscriptExpanded: Bool = false
 
   var body: some View {
     Group {
@@ -109,7 +98,7 @@ struct ConversationsPage: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(Color.clear)
+    .glassContent()
     .onAppear {
       // Load conversations when view appears
       if appState.conversations.isEmpty {
@@ -126,10 +115,14 @@ struct ConversationsPage: View {
           await appState.loadFolders()
         }
       }
+      consumePendingAutomationOpenConversation()
+    }
+    .onReceive(automation.$pendingOpenRequest.compactMap { $0 }) { _ in
+      consumePendingAutomationOpenConversation()
     }
     .onReceive(NotificationCenter.default.publisher(for: .desktopAutomationOpenConversationRequested)) {
-      notification in
-      handleAutomationOpenConversation(notification)
+      _ in
+      consumePendingAutomationOpenConversation()
     }
     .onReceive(
       NotificationCenter.default.publisher(for: .desktopAutomationSetConversationsSearchRequested)
@@ -156,6 +149,7 @@ struct ConversationsPage: View {
       showMergeConfirmation = false
       isMerging = false
       mergeError = nil
+      isLiveTranscriptExpanded = false
     }
     .dismissableSheet(isPresented: $showCreateFolderSheet) {
       FolderFormSheet(folder: nil, onDismiss: { showCreateFolderSheet = false })
@@ -174,20 +168,15 @@ struct ConversationsPage: View {
     }
   }
 
-  private func handleAutomationOpenConversation(_ notification: Notification) {
-    guard let conversationId = notification.userInfo?["conversationId"] as? String else { return }
-    let showTranscript = notification.userInfo?["showTranscript"] as? Bool ?? false
+  private func consumePendingAutomationOpenConversation() {
+    guard let request = ConversationDetailAutomationState.shared.takePendingOpenRequest() else { return }
+    handleAutomationOpenConversation(conversationId: request.conversationId)
+  }
+
+  private func handleAutomationOpenConversation(conversationId: String) {
 
     func present(_ conversation: ServerConversation) {
       selectedConversation = conversation
-      guard showTranscript else { return }
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-        NotificationCenter.default.post(
-          name: .desktopAutomationShowConversationTranscriptRequested,
-          object: nil,
-          userInfo: ["conversationId": conversation.id]
-        )
-      }
     }
 
     if let conversation = appState.conversations.first(where: { $0.id == conversationId }) {
@@ -214,12 +203,40 @@ struct ConversationsPage: View {
   // MARK: - Main View with Recording Header + List
 
   private var mainConversationsView: some View {
+    Group {
+      if isLiveTranscriptExpanded && appState.isLiveCapturing {
+        ConversationsLiveTranscriptFullScreen(
+          onCollapse: {
+            OmiMotion.withGated(.easeInOut(duration: 0.2)) {
+              isLiveTranscriptExpanded = false
+            }
+          }
+        )
+        .transition(.opacity)
+      } else {
+        conversationsListLayout
+      }
+    }
+    // Collapse if capture pauses (meeting ends) or the session stops while expanded.
+    .onChange(of: appState.isLiveCapturing) { _, isLive in
+      if !isLive {
+        isLiveTranscriptExpanded = false
+      }
+    }
+  }
+
+  /// The Conversations list chrome: pinned title row, then the scrolling live card + list.
+  private var conversationsListLayout: some View {
     VStack(spacing: 0) {
-      // Conversations header
+      // Fixed page header — title + actions stay pinned; everything below it
+      // (live transcript, search, filters, list) scrolls together as one.
       HStack {
-        Text("Conversations")
-          .scaledFont(size: OmiType.heading, weight: .semibold)
-          .foregroundColor(OmiColors.textPrimary)
+        VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
+          Text("Conversations")
+            .inkStyle(InkType.firstTitle, color: Ink.primary)
+          Text("Recordings, notes, and transcripts from your day")
+            .inkStyle(InkType.statusLabel, color: Ink.secondary)
+        }
 
         Spacer()
 
@@ -229,16 +246,100 @@ struct ConversationsPage: View {
 
         quickNoteButton
 
-        if !appState.isTranscribing {
+        // Only offer the manual "Start Recording" affordance when listening is
+        // set to Always. In Meetings-only (the default) or Off, showing it while
+        // nothing is transcribing misleads the user into thinking capture is
+        // active — during an actual meeting isTranscribing is already true and
+        // the live transcript replaces this button.
+        if !appState.isTranscribing && audioRecordingMode == .always {
           startRecordingButton
         }
       }
       .padding(.horizontal, OmiSpacing.xxl)
       .padding(.top, OmiSpacing.lg)
       .padding(.bottom, OmiSpacing.md)
+      .background(Color.clear)
 
-      // Conversation list
+      // The whole page below the header scrolls together. Floating action bars
+      // (load-more, merge) stay pinned to the bottom via the ZStack overlay.
+      ZStack(alignment: .bottom) {
+        scrollingBody
+        floatingActionBars
+      }
+    }
+  }
+
+  /// Everything below the fixed header, rendered inside a single scroll so the
+  /// live transcript, search bar, filters and conversation list all scroll
+  /// together. When `embedded`, the parent owns the scroll and this renders bare.
+  @ViewBuilder private var scrollingBody: some View {
+    let content = VStack(spacing: 0) {
+      // Live transcript while actually capturing. Only Meetings keeps a session
+      // armed with the mic paused (`isAwaitingMeeting`); that is not Live.
+      if appState.isLiveCapturing {
+        ConversationsLiveTranscript(
+          onExpand: {
+            OmiMotion.withGated(.easeInOut(duration: 0.2)) {
+              isLiveTranscriptExpanded = true
+            }
+          }
+        )
+        .padding(.horizontal, OmiSpacing.xxl)
+        .padding(.top, OmiSpacing.md)
+        .padding(.bottom, OmiSpacing.md)
+      }
+
       conversationListSection
+    }
+
+    if embedded {
+      content
+    } else {
+      // minHeight = viewport keeps short/empty/loading states filling the
+      // window (so their `maxHeight: .infinity` centering still works) while
+      // taller content scrolls normally.
+      GeometryReader { geo in
+        ScrollView {
+          content
+            .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+        }
+        .refreshable {
+          await appState.refreshConversations()
+        }
+        .glassScrollFade()
+      }
+    }
+  }
+
+  /// Bottom-pinned floating controls that overlay the scroll (they must not
+  /// scroll with the content). Load-more only applies to the main list; the
+  /// merge bar applies to both list and search results.
+  @ViewBuilder private var floatingActionBars: some View {
+    if !embedded {
+      if searchQuery.isEmpty && appState.canLoadMoreConversations
+        && !(isMultiSelectMode && !selectedConversationIds.isEmpty)
+      {
+        Button {
+          Task {
+            await appState.loadMoreConversations()
+          }
+        } label: {
+          Text("Load older conversations")
+            .scaledFont(size: OmiType.caption, weight: .medium)
+            .foregroundColor(Ink.primary)
+            .padding(.horizontal, OmiSpacing.lg)
+            .frame(height: 34)
+            .glassFloatingBar(cornerRadius: 17)
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, OmiSpacing.lg)
+        .accessibilityIdentifier("conversations-load-more")
+      }
+
+      if isMultiSelectMode && !selectedConversationIds.isEmpty {
+        mergeActionBar
+          .transition(.move(edge: .bottom).combined(with: .opacity))
+      }
     }
   }
 
@@ -261,17 +362,16 @@ struct ConversationsPage: View {
         }
       }
     } label: {
-      HStack(spacing: OmiSpacing.xxs) {
+      HStack(spacing: OmiSpacing.xs) {
         Image(systemName: isMultiSelectMode ? "checkmark.circle" : "checkmark.circle.badge.questionmark")
           .scaledFont(size: OmiType.caption)
         Text(isMultiSelectMode ? "Done" : "Select")
           .scaledFont(size: OmiType.body, weight: .medium)
       }
-      .foregroundColor(isMultiSelectMode ? OmiColors.textPrimary : OmiColors.textSecondary)
+      .foregroundColor(isMultiSelectMode ? Ink.primary : Ink.secondary)
       .padding(.horizontal, OmiSpacing.md)
       .padding(.vertical, OmiSpacing.sm)
-      .omiControlSurface(
-        fill: OmiColors.backgroundSecondary, radius: 18, stroke: OmiColors.border.opacity(0.18))
+      .glassChip(isActive: isMultiSelectMode)
     }
     .buttonStyle(.plain)
     .help(isMultiSelectMode ? "Exit selection" : "Select conversations to merge")
@@ -282,17 +382,16 @@ struct ConversationsPage: View {
     Button {
       NotificationCenter.default.post(name: .navigateToRewindNotes, object: nil)
     } label: {
-      HStack(spacing: OmiSpacing.xxs) {
+      HStack(spacing: OmiSpacing.xs) {
         Image(systemName: "note.text")
           .scaledFont(size: OmiType.caption)
         Text("Quick Note")
           .scaledFont(size: OmiType.body, weight: .medium)
       }
-      .foregroundColor(OmiColors.textSecondary)
+      .foregroundColor(Ink.secondary)
       .padding(.horizontal, OmiSpacing.md)
       .padding(.vertical, OmiSpacing.sm)
-      .omiControlSurface(
-        fill: OmiColors.backgroundSecondary, radius: 18, stroke: OmiColors.border.opacity(0.18))
+      .glassChip()
     }
     .buttonStyle(.plain)
   }
@@ -303,44 +402,16 @@ struct ConversationsPage: View {
     VStack(spacing: 0) {
       // Section header with search bar and filters
       HStack(spacing: OmiSpacing.sm) {
-        // Search bar
-        HStack(spacing: OmiSpacing.sm) {
-          Image(systemName: "magnifyingglass")
-            .scaledFont(size: OmiType.body)
-            .foregroundColor(OmiColors.textTertiary)
-
-          TextField("Search conversations...", text: $searchQuery)
-            .textFieldStyle(.plain)
-            .scaledFont(size: OmiType.body)
-            .foregroundColor(OmiColors.textPrimary)
-            .onChange(of: searchQuery) { _, newValue in
-              // Feed input to debouncer
-              searchDebouncer.inputQuery = newValue
-            }
-            .onChange(of: searchDebouncer.debouncedQuery) { _, newValue in
-              // Debounced value changed - perform search
-              performSearch(query: newValue)
-            }
-
-          if !searchQuery.isEmpty {
-            Button(action: {
-              searchQuery = ""
-              searchDebouncer.inputQuery = ""
-              searchResults = []
-              searchError = nil
-            }) {
-              Image(systemName: "xmark.circle.fill")
-                .scaledFont(size: OmiType.body)
-                .foregroundColor(OmiColors.textTertiary)
-            }
-            .buttonStyle(.plain)
+        OmiSearchField(
+          placeholder: "Search conversations",
+          text: $searchQuery,
+          isLoading: isSearching
+        )
+        .onChange(of: searchQuery) { _, newValue in
+          searchCoordinator.submit(newValue) { query in
+            performSearch(query: query)
           }
         }
-        .padding(.horizontal, OmiSpacing.sm)
-        .padding(.vertical, OmiSpacing.md)
-        .frame(minHeight: 46)
-        .omiControlSurface(
-          fill: OmiColors.backgroundSecondary, radius: 18, stroke: OmiColors.border.opacity(0.18))
 
         // Filter buttons
         filterButtonsRow
@@ -358,61 +429,45 @@ struct ConversationsPage: View {
       .padding(.horizontal, OmiSpacing.xxl)
       .padding(.bottom, OmiSpacing.md)
 
-      // List - show search results or regular conversations
-      if !searchQuery.isEmpty {
+      // List - show search results or regular conversations. Both render
+      // embedded (no inner ScrollView); the page's outer ScrollView (see
+      // `scrollingBody`) owns scrolling so the whole page scrolls together.
+      // Floating load-more / merge bars live in `floatingActionBars`.
+      if DebouncedSearchCoordinator.isActive(searchQuery) {
         // Search results view
         searchResultsView
       } else {
         // Regular conversation list
-        ZStack(alignment: .bottom) {
-          ConversationListView(
-            conversations: appState.conversations,
-            isLoading: appState.isLoadingConversations,
-            error: appState.conversationsError,
-            folders: appState.folders,
-            isCompactView: isCompactView,
-            onSelect: { conversation in
-              AnalyticsManager.shared.memoryListItemClicked(conversationId: conversation.id)
-              selectedConversation = conversation
-            },
-            onRefresh: {
-              Task {
-                await appState.refreshConversations()
-              }
-            },
-            onMoveToFolder: { conversationId, folderId in
-              await appState.moveConversationToFolder(conversationId, folderId: folderId)
-            },
-            isMultiSelectMode: isMultiSelectMode,
-            selectedIds: selectedConversationIds,
-            onToggleSelection: { conversationId in
-              if selectedConversationIds.contains(conversationId) {
-                selectedConversationIds.remove(conversationId)
-              } else {
-                selectedConversationIds.insert(conversationId)
-              }
-            },
-            embedded: embedded,
-            appState: appState
-          )
-
-          if appState.canLoadMoreConversations && !(isMultiSelectMode && !selectedConversationIds.isEmpty) {
-            Button("Load older conversations") {
-              Task {
-                await appState.loadMoreConversations()
-              }
+        ConversationListView(
+          conversations: appState.conversations,
+          isLoading: appState.isLoadingConversations,
+          error: appState.conversationsError,
+          folders: appState.folders,
+          isCompactView: isCompactView,
+          onSelect: { conversation in
+            AnalyticsManager.shared.memoryListItemClicked(conversationId: conversation.id)
+            selectedConversation = conversation
+          },
+          onRefresh: {
+            Task {
+              await appState.refreshConversations()
             }
-            .buttonStyle(.bordered)
-            .padding(.bottom, OmiSpacing.md)
-            .accessibilityIdentifier("conversations-load-more")
-          }
-
-          // Floating merge action bar
-          if isMultiSelectMode && !selectedConversationIds.isEmpty {
-            mergeActionBar
-              .transition(.move(edge: .bottom).combined(with: .opacity))
-          }
-        }
+          },
+          onMoveToFolder: { conversationId, folderId in
+            await appState.moveConversationToFolder(conversationId, folderId: folderId)
+          },
+          isMultiSelectMode: isMultiSelectMode,
+          selectedIds: selectedConversationIds,
+          onToggleSelection: { conversationId in
+            if selectedConversationIds.contains(conversationId) {
+              selectedConversationIds.remove(conversationId)
+            } else {
+              selectedConversationIds.insert(conversationId)
+            }
+          },
+          embedded: true,
+          appState: appState
+        )
       }
     }
   }
@@ -426,17 +481,17 @@ struct ConversationsPage: View {
           ProgressView()
           Text("Searching...")
             .scaledFont(size: OmiType.body)
-            .foregroundColor(OmiColors.textTertiary)
+            .foregroundColor(Ink.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if searchError != nil {
         VStack(spacing: OmiSpacing.md) {
           Image(systemName: "exclamationmark.triangle")
             .scaledFont(size: 32)
-            .foregroundColor(OmiColors.textTertiary)
+            .foregroundColor(Ink.secondary)
           Text("Couldn't search conversations. Check your connection and try again.")
             .scaledFont(size: OmiType.body)
-            .foregroundColor(OmiColors.textTertiary)
+            .foregroundColor(Ink.secondary)
             .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -445,32 +500,26 @@ struct ConversationsPage: View {
         VStack(spacing: OmiSpacing.md) {
           Image(systemName: "magnifyingglass")
             .scaledFont(size: 32)
-            .foregroundColor(OmiColors.textTertiary.opacity(0.5))
+            .foregroundColor(Ink.secondary)
           Text("No conversations found")
             .scaledFont(size: OmiType.body)
-            .foregroundColor(OmiColors.textTertiary)
+            .foregroundColor(Ink.secondary)
           Text("Try a different search term")
             .scaledFont(size: OmiType.caption)
-            .foregroundColor(OmiColors.textQuaternary)
+            .foregroundColor(Ink.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        ZStack(alignment: .bottom) {
-          searchResultsContent
-
-          // Floating merge action bar (also show in search results)
-          if isMultiSelectMode && !selectedConversationIds.isEmpty {
-            mergeActionBar
-              .transition(.move(edge: .bottom).combined(with: .opacity))
-          }
-        }
+        // Renders bare — the page's outer ScrollView owns scrolling and the
+        // merge bar floats via `floatingActionBars`.
+        searchResultsContent
       }
     }
   }
 
   @ViewBuilder
   private var searchResultsContent: some View {
-    let content = LazyVStack(spacing: OmiSpacing.sm) {
+    LazyVStack(spacing: OmiSpacing.sm) {
       ForEach(searchResults) { conversation in
         ConversationRowView(
           conversation: conversation,
@@ -498,14 +547,6 @@ struct ConversationsPage: View {
     }
     .padding(.horizontal, OmiSpacing.lg)
     .padding(.bottom, isMultiSelectMode && !selectedConversationIds.isEmpty ? 80 : OmiSpacing.lg)
-
-    if embedded {
-      content
-    } else {
-      ScrollView {
-        content
-      }
-    }
   }
 
   // MARK: - Search
@@ -565,16 +606,10 @@ struct ConversationsPage: View {
           Text("Starred")
             .scaledFont(size: OmiType.caption, weight: .medium)
         }
-        .foregroundColor(appState.showStarredOnly ? OmiColors.amber : OmiColors.textSecondary)
+        .foregroundColor(appState.showStarredOnly ? PageGlass.starred : Ink.secondary)
         .padding(.horizontal, OmiSpacing.md)
         .padding(.vertical, OmiSpacing.sm)
-        .omiControlSurface(
-          fill: appState.showStarredOnly
-            ? OmiColors.amber.opacity(0.16) : OmiColors.backgroundSecondary,
-          radius: 16,
-          stroke: appState.showStarredOnly
-            ? OmiColors.amber.opacity(0.36) : OmiColors.border.opacity(0.14)
-        )
+        .glassChip(isActive: appState.showStarredOnly)
       }
       .buttonStyle(.plain)
       .disabled(isFilteringStarred)
@@ -612,16 +647,10 @@ struct ConversationsPage: View {
               .scaledFont(size: OmiType.caption, weight: .medium)
           }
         }
-        .foregroundColor(appState.selectedDateFilter != nil ? .black : OmiColors.textSecondary)
+        .foregroundColor(appState.selectedDateFilter != nil ? Ink.primary : Ink.secondary)
         .padding(.horizontal, OmiSpacing.md)
         .padding(.vertical, OmiSpacing.sm)
-        .omiControlSurface(
-          fill: appState.selectedDateFilter != nil
-            ? OmiColors.textPrimary : OmiColors.backgroundSecondary,
-          radius: 16,
-          stroke: appState.selectedDateFilter != nil
-            ? OmiColors.border.opacity(0.28) : OmiColors.border.opacity(0.14)
-        )
+        .glassChip(isActive: appState.selectedDateFilter != nil)
       }
       .buttonStyle(.plain)
       .disabled(isFilteringDate)
@@ -640,7 +669,7 @@ struct ConversationsPage: View {
         }) {
           Image(systemName: "xmark.circle.fill")
             .scaledFont(size: OmiType.caption)
-            .foregroundColor(OmiColors.textTertiary)
+            .foregroundColor(Ink.secondary)
         }
         .buttonStyle(.plain)
       }
@@ -670,7 +699,7 @@ struct ConversationsPage: View {
     }
     .padding()
     .frame(width: 300)
-    .background(OmiColors.backgroundSecondary)
+    .background(Ink.surface)
   }
 
   private func formatFilterDate(_ date: Date) -> String {
@@ -686,7 +715,7 @@ struct ConversationsPage: View {
       // Selection count
       Text("\(selectedConversationIds.count) selected")
         .scaledFont(size: OmiType.body, weight: .medium)
-        .foregroundColor(OmiColors.textSecondary)
+        .foregroundColor(Ink.secondary)
 
       Spacer()
 
@@ -707,7 +736,7 @@ struct ConversationsPage: View {
           ) ? "Deselect All" : "Select All"
         )
         .scaledFont(size: OmiType.caption, weight: .medium)
-        .foregroundColor(OmiColors.textSecondary)
+        .foregroundColor(Ink.secondary)
       }
       .buttonStyle(.plain)
 
@@ -728,18 +757,18 @@ struct ConversationsPage: View {
             .scaledFont(size: OmiType.body, weight: .semibold)
         }
         .foregroundColor(
-          selectedConversationIds.count >= 2 ? OmiColors.textPrimary : OmiColors.textTertiary
+          selectedConversationIds.count >= 2 ? Ink.surface : Ink.secondary
         )
         .padding(.horizontal, OmiSpacing.lg)
         .padding(.vertical, OmiSpacing.sm)
         .background(
           Capsule()
-            .fill(selectedConversationIds.count >= 2 ? Color.white : OmiColors.backgroundTertiary)
+            .fill(selectedConversationIds.count >= 2 ? Ink.primary : Ink.rowFillHover)
         )
         .overlay(
           Capsule()
-            .stroke(
-              selectedConversationIds.count >= 2 ? OmiColors.border : Color.clear, lineWidth: 1)
+            .strokeBorder(
+              selectedConversationIds.count >= 2 ? Color.clear : Ink.separator, lineWidth: 1)
         )
       }
       .buttonStyle(.plain)
@@ -747,11 +776,7 @@ struct ConversationsPage: View {
     }
     .padding(.horizontal, OmiSpacing.lg)
     .padding(.vertical, OmiSpacing.md)
-    .background(
-      RoundedRectangle(cornerRadius: OmiChrome.smallControlRadius)
-        .fill(OmiColors.backgroundTertiary)
-        .shadow(color: .black.opacity(0.3), radius: 10, y: -2)
-    )
+    .glassFloatingBar()
     .padding(.horizontal, OmiSpacing.lg)
     .padding(.bottom, OmiSpacing.lg)
     .alert("Merge Conversations", isPresented: $showMergeConfirmation) {
@@ -824,11 +849,10 @@ struct ConversationsPage: View {
         Text("Start Recording")
           .scaledFont(size: OmiType.body, weight: .medium)
       }
-      .foregroundColor(.black)
+      .foregroundColor(Ink.surface)
       .padding(.horizontal, OmiSpacing.md)
       .padding(.vertical, OmiSpacing.sm)
-      .omiControlSurface(
-        fill: OmiColors.textPrimary, radius: 18, stroke: OmiColors.border.opacity(0.2))
+      .background(Capsule(style: .continuous).fill(Ink.primary))
     }
     .buttonStyle(.plain)
   }
@@ -874,7 +898,7 @@ private struct TranscriptNotesDivider: View {
 
   var body: some View {
     Rectangle()
-      .fill(isDragging ? OmiColors.textSecondary : OmiColors.border)
+      .fill(isDragging ? Ink.secondary : Ink.separator)
       .frame(width: 1)
       .contentShape(Rectangle().inset(by: -4))  // Larger hit area
       .onHover { hovering in
@@ -902,6 +926,6 @@ private struct TranscriptNotesDivider: View {
   #Preview {
     ConversationsPage(appState: AppState(), selectedConversation: .constant(nil))
       .frame(width: 600, height: 800)
-      .background(OmiColors.backgroundSecondary)
+      .background(Ink.rowFill)
   }
 #endif

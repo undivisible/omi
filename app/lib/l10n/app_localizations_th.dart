@@ -743,11 +743,6 @@ class AppLocalizationsTh extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'แผนของคุณจะต่ออายุในวันที่ $date';
-  }
-
-  @override
   String get basicPlan => 'แผนฟรี';
 
   @override
@@ -1782,20 +1777,6 @@ class AppLocalizationsTh extends AppLocalizations {
   String get lovingOmi => 'ชอบ Omi ไหม?';
 
   @override
-  String get leaveReviewIos =>
-      'ช่วยเราเข้าถึงคนมากขึ้นด้วยการรีวิวใน App Store ความคิดเห็นของคุณมีความหมายมากสำหรับเรา!';
-
-  @override
-  String get leaveReviewAndroid =>
-      'ช่วยเราเข้าถึงคนมากขึ้นด้วยการรีวิวใน Google Play Store ความคิดเห็นของคุณมีความหมายมากสำหรับเรา!';
-
-  @override
-  String get rateOnAppStore => 'ให้คะแนนบน App Store';
-
-  @override
-  String get rateOnGooglePlay => 'ให้คะแนนบน Google Play';
-
-  @override
   String get maybeLater => 'ไว้ทีหลัง';
 
   @override
@@ -2128,6 +2109,18 @@ class AppLocalizationsTh extends AppLocalizations {
 
   @override
   String get editMemory => '✏️ แก้ไขความทรงจำ';
+
+  @override
+  String get pinAsBaseline => 'ปักหมุดเป็นค่าพื้นฐาน';
+
+  @override
+  String get unpinAsBaseline => 'เลิกปักหมุดจากค่าพื้นฐาน';
+
+  @override
+  String get baselineMemory => 'หน่วยความจำพื้นฐาน';
+
+  @override
+  String get alwaysInContext => 'อยู่ในบริบทเสมอ';
 
   @override
   String get memoryContentHint => 'ฉันชอบกินไอศกรีม...';
@@ -9555,10 +9548,10 @@ class AppLocalizationsTh extends AppLocalizations {
       'ข้อมูลของคุณได้รับการปกป้องด้วยการเข้ารหัสที่แข็งแกร่งตามค่าเริ่มต้น และคุณเป็นผู้ควบคุมว่าจะจัดเก็บและใช้งานอย่างไร';
 
   @override
-  String get sttModelAccuracy => 'Accuracy';
+  String get sttModelAccuracy => 'ความแม่นยำ';
 
   @override
-  String get whisperModelSizeBase => 'Base';
+  String get whisperModelSizeBase => 'พื้นฐาน';
 
   @override
   String get cloudTranscription => 'การถอดความบนคลาวด์';
@@ -9567,52 +9560,52 @@ class AppLocalizationsTh extends AppLocalizations {
   String get sttProviderDeepgram => 'Deepgram';
 
   @override
-  String get deleteOnDeviceModel => 'Delete Model';
+  String get deleteOnDeviceModel => 'ลบโมเดล';
 
   @override
-  String get deleteOnDeviceModelConfirm => 'Are you sure you want to delete this model?';
+  String get deleteOnDeviceModelConfirm => 'คุณแน่ใจหรือไม่ว่าต้องการลบโมเดลนี้?';
 
   @override
-  String get onDeviceModelDownloaded => 'Downloaded';
+  String get onDeviceModelDownloaded => 'ดาวน์โหลดแล้ว';
 
   @override
-  String get sttModelFaster => 'Faster';
+  String get sttModelFaster => 'เร็วกว่า';
 
   @override
-  String get sttFilterAuto => 'Auto';
+  String get sttFilterAuto => 'อัตโนมัติ';
 
   @override
-  String get sttModelHigher => 'Higher';
+  String get sttModelHigher => 'สูงกว่า';
 
   @override
-  String get whisperModelSizeLarge => 'Large';
+  String get whisperModelSizeLarge => 'ใหญ่';
 
   @override
-  String get sttModelLower => 'Lower';
+  String get sttModelLower => 'ต่ำกว่า';
 
   @override
-  String get whisperModelSizeMedium => 'Medium';
+  String get whisperModelSizeMedium => 'กลาง';
 
   @override
-  String get onDeviceModelDeleted => 'Model deleted';
+  String get onDeviceModelDeleted => 'ลบโมเดลแล้ว';
 
   @override
-  String get onDeviceModelDownloadFailed => 'Model download failed';
+  String get onDeviceModelDownloadFailed => 'ดาวน์โหลดโมเดลไม่สำเร็จ';
 
   @override
-  String get onDeviceModelDownloadFailedDesc => 'Failed to download Whisper model. Please try again.';
+  String get onDeviceModelDownloadFailedDesc => 'ดาวน์โหลดโมเดล Whisper ไม่สำเร็จ กรุณาลองอีกครั้ง';
 
   @override
-  String get onDeviceModelDownloadSuccess => 'Model downloaded';
+  String get onDeviceModelDownloadSuccess => 'ดาวน์โหลดโมเดลแล้ว';
 
   @override
-  String get onDeviceModelDownloadSuccessDesc => 'Whisper model downloaded successfully';
+  String get onDeviceModelDownloadSuccessDesc => 'ดาวน์โหลดโมเดล Whisper สำเร็จแล้ว';
 
   @override
-  String get onDeviceModelSize => 'Model Size';
+  String get onDeviceModelSize => 'ขนาดโมเดล';
 
   @override
-  String get sttNone => 'None';
+  String get sttNone => 'ไม่มี';
 
   @override
   String get onDeviceTranscription => 'การถอดความบนอุปกรณ์';
@@ -9621,10 +9614,10 @@ class AppLocalizationsTh extends AppLocalizations {
   String get onDeviceTranscriptionDesc => 'การถอดความประมวลผลในเครื่องบนอุปกรณ์ของคุณ';
 
   @override
-  String get sttModelSlower => 'Slower';
+  String get sttModelSlower => 'ช้ากว่า';
 
   @override
-  String get whisperModelSizeSmall => 'Small';
+  String get whisperModelSizeSmall => 'เล็ก';
 
   @override
   String get sttProviderSoniox => 'Soniox';
@@ -9639,10 +9632,10 @@ class AppLocalizationsTh extends AppLocalizations {
   String get sttProviderSpeechmatics => 'Speechmatics';
 
   @override
-  String get sttModelSpeed => 'Speed';
+  String get sttModelSpeed => 'ความเร็ว';
 
   @override
-  String get whisperModelSizeTiny => 'Tiny';
+  String get whisperModelSizeTiny => 'เล็กมาก';
 
   @override
   String get transcriptionLanguage => 'ภาษาการถอดความ';
@@ -9657,51 +9650,51 @@ class AppLocalizationsTh extends AppLocalizations {
   String get whisperModelDesc => 'เลือกโมเดลสำหรับการถอดความบนอุปกรณ์';
 
   @override
-  String get downgradeToFreemiumTitle => 'Downgrade to Freemium?';
+  String get downgradeToFreemiumTitle => 'ดาวน์เกรดเป็นแพ็คเกจฟรีหรือไม่?';
 
   @override
-  String get downgradeLimitationsHeading => 'You will experience these limitations:';
+  String get downgradeLimitationsHeading => 'คุณจะพบข้อจำกัดเหล่านี้:';
 
   @override
-  String get downgradeLimitBattery => '7x battery consumption';
+  String get downgradeLimitBattery => 'ใช้แบตเตอรี่มากขึ้น 7 เท่า';
 
   @override
-  String get downgradeLimitQuality => '30% less transcription quality';
+  String get downgradeLimitQuality => 'คุณภาพการถอดเสียงลดลง 30%';
 
   @override
-  String get downgradeLimitDelay => '5-7 second delay';
+  String get downgradeLimitDelay => 'ความล่าช้า 5-7 วินาที';
 
   @override
-  String get downgradeLimitSpeakers => 'Cannot identify speakers';
+  String get downgradeLimitSpeakers => 'ไม่สามารถระบุผู้พูดได้';
 
   @override
-  String get downgradeAnyway => 'Downgrade Anyway';
+  String get downgradeAnyway => 'ดาวน์เกรดต่อไป';
 
   @override
-  String get googleCalendarNotConnected => 'Google Calendar Not Connected';
+  String get googleCalendarNotConnected => 'ยังไม่ได้เชื่อมต่อปฏิทิน Google';
 
   @override
-  String get googleCalendarConnectPrompt => 'Connect your Google Calendar to link conversations to calendar events.';
+  String get googleCalendarConnectPrompt => 'เชื่อมต่อปฏิทิน Google ของคุณเพื่อเชื่อมโยงการสนทนากับกิจกรรมในปฏิทิน';
 
   @override
   String linkedToEvent(String title) {
-    return 'Linked to \"$title\"';
+    return 'เชื่อมโยงกับ \"$title\" แล้ว';
   }
 
   @override
-  String get failedToLinkCalendarEvent => 'Failed to link calendar event';
+  String get failedToLinkCalendarEvent => 'ไม่สามารถเชื่อมโยงกิจกรรมในปฏิทินได้';
 
   @override
-  String get thanksForYourFeedback => 'Thanks for your feedback!';
+  String get thanksForYourFeedback => 'ขอบคุณสำหรับความคิดเห็นของคุณ!';
 
   @override
-  String get copyMessage => 'Copy message';
+  String get copyMessage => 'คัดลอกข้อความ';
 
   @override
-  String get searchSettings => 'Search settings…';
+  String get searchSettings => 'ค้นหาการตั้งค่า…';
 
   @override
-  String get errorLoadingAudio => 'Error loading audio';
+  String get errorLoadingAudio => 'เกิดข้อผิดพลาดในการโหลดเสียง';
 
   @override
   String get rayBanMetaMicPickerTitle => 'เลือกไมโครโฟน Ray-Ban Meta ของคุณ';
@@ -9719,4 +9712,76 @@ class AppLocalizationsTh extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'เชื่อมต่อกับไมโครโฟนนั้นไม่ได้ ตรวจสอบว่าเชื่อมต่ออยู่ในการตั้งค่า iPhone';
+
+  @override
+  String get syncStatusTooOld => 'เก่าเกินกว่าจะซิงค์ — Omi รับไม่ได้';
+
+  @override
+  String get planSheetChooseYourPlan => 'เลือกแพ็กเกจของคุณเพื่อปลดล็อก Omi แบบไม่จำกัด';
+
+  @override
+  String get availableOnMacMobileWeb => 'ใช้ได้บน Mac มือถือ และเว็บ';
+
+  @override
+  String get popularBadge => 'ยอดนิยม';
+
+  @override
+  String get worksOnDesktop => 'ใช้งานได้บนเดสก์ท็อป';
+
+  @override
+  String get noDesktopAccess => 'ใช้งานบนเดสก์ท็อปไม่ได้';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months เดือน / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'ฟรี $count เดือน',
+      one: 'ฟรี 1 เดือน',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro => 'Omi ใช้ฟรี แต่เวอร์ชันฟรีมีข้อจำกัดที่ส่งผลต่อประสบการณ์ของคุณ:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'ดีเลย์ 5-7 วินาที (ไม่ใช่แบบเรียลไทม์)';
+
+  @override
+  String get downgradeToFreemiumAction => 'เปลี่ยนไปใช้เวอร์ชันฟรี';
+
+  @override
+  String get getFreeUnlimitedAccess => 'รับสิทธิ์ใช้งานไม่จำกัดฟรี';
+
+  @override
+  String get shareDataForTraining => 'แบ่งปันข้อมูลเพื่อการฝึกฝน';
+
+  @override
+  String get yourRequestUnderReview => 'คำขอของคุณอยู่ระหว่างการตรวจสอบ';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'ต้องอัปเดต';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage => 'ติดตั้งแอป Omi ล่าสุดเพื่อใช้งานต่อหลังการย้ายบัญชี';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'กำลังย้ายข้อมูล';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'บัญชีของคุณกำลังย้าย ฟีเจอร์ผลิตภัณฑ์จะหยุดชั่วคราวจนกว่าการย้ายจะเสร็จ';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'บัญชีของคุณอยู่ในโหมดบำรุงรักษาหลังการย้อนกลับการย้าย ข้อมูลที่ใหม่กว่าบางส่วนอาจถูกแยกไว้';
+
+  @override
+  String get accountCutoverOpenStore => 'เปิดสโตร์';
 }
