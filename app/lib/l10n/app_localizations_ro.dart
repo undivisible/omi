@@ -750,11 +750,6 @@ class AppLocalizationsRo extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Planul tău se reînnoiește pe $date.';
-  }
-
-  @override
   String get basicPlan => 'Plan gratuit';
 
   @override
@@ -1475,7 +1470,7 @@ class AppLocalizationsRo extends AppLocalizations {
   String get payYourSttProvider => 'Folosește Omi liber. Plătești doar furnizorul STT direct.';
 
   @override
-  String get freeMinutesMonth => '1.200 de minute gratuite/lună incluse. Nelimitat cu ';
+  String get freeMinutesMonth => '300 de minute gratuite/lună incluse. Nelimitat cu ';
 
   @override
   String get omiUnlimited => 'Omi Nelimitat';
@@ -2137,16 +2132,16 @@ class AppLocalizationsRo extends AppLocalizations {
   String get editMemory => '✏️ Editează amintirea';
 
   @override
-  String get pinAsBaseline => 'Pin as Baseline';
+  String get pinAsBaseline => 'Fixează ca referință';
 
   @override
-  String get unpinAsBaseline => 'Unpin from Baseline';
+  String get unpinAsBaseline => 'Anulează fixarea ca referință';
 
   @override
-  String get baselineMemory => 'Baseline Memory';
+  String get baselineMemory => 'Memorie de referință';
 
   @override
-  String get alwaysInContext => 'Always in context';
+  String get alwaysInContext => 'Mereu în context';
 
   @override
   String get memoryContentHint => 'Îmi place să mănânc înghețată...';
@@ -4730,7 +4725,7 @@ class AppLocalizationsRo extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Niciun acces specific la date configurat.';
 
   @override
-  String get basicPlanDescription => '1.200 minute premium + nelimitat pe dispozitiv';
+  String get basicPlanDescription => '300 minute premium + nelimitat pe dispozitiv';
 
   @override
   String get minutes => 'minute';
@@ -6025,8 +6020,7 @@ class AppLocalizationsRo extends AppLocalizations {
   String get cloudProvider => 'Furnizor cloud';
 
   @override
-  String get premiumMinutesInfo =>
-      '1.200 minute premium/lună. Fila Pe dispozitiv oferă transcriere gratuită nelimitată.';
+  String get premiumMinutesInfo => '300 minute premium/lună. Fila Pe dispozitiv oferă transcriere gratuită nelimitată.';
 
   @override
   String get viewUsage => 'Vizualizați utilizarea';
@@ -6109,7 +6103,7 @@ class AppLocalizationsRo extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1.200 minute premium/lună. Fila Pe dispozitiv oferă transcriere gratuită nelimitată. ';
+      '300 minute premium/lună. Fila Pe dispozitiv oferă transcriere gratuită nelimitată. ';
 
   @override
   String get audioProcessedLocally =>
@@ -9818,4 +9812,79 @@ class AppLocalizationsRo extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Nu s-a putut conecta la acel microfon. Asigură-te că este conectat în Configurările iPhone.';
+
+  @override
+  String get syncStatusTooOld => 'Prea veche pentru sincronizare — Omi nu o poate accepta';
+
+  @override
+  String get planSheetChooseYourPlan => 'Alege-ți planul pentru a debloca Omi nelimitat.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Disponibil pe Mac, mobil și web';
+
+  @override
+  String get popularBadge => 'POPULAR';
+
+  @override
+  String get worksOnDesktop => 'Funcționează pe desktop';
+
+  @override
+  String get noDesktopAccess => 'Nu funcționează pe desktop';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months luni / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count de luni gratuit',
+      few: '$count luni gratuit',
+      one: '$count lună gratuit',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi este gratuit, dar versiunea gratuită are limite care îți afectează experiența:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'Întârziere de 5-7 secunde (nu în timp real)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Treci la versiunea gratuită';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Obține acces nelimitat gratuit';
+
+  @override
+  String get shareDataForTraining => 'Partajează date pentru antrenare';
+
+  @override
+  String get yourRequestUnderReview => 'Cererea ta este în curs de examinare';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Actualizare necesară';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Instalează cea mai recentă aplicație Omi pentru a continua după migrarea contului.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Migrare în curs';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Contul tău este în curs de migrare. Funcțiile produsului sunt întrerupte până la finalizarea migrării.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Contul tău este în mentenanță după un rollback al migrării. Unele date mai noi pot fi izolate.';
+
+  @override
+  String get accountCutoverOpenStore => 'Deschide magazinul';
 }

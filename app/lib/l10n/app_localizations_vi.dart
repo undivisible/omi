@@ -748,11 +748,6 @@ class AppLocalizationsVi extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Gói của bạn sẽ gia hạn vào $date.';
-  }
-
-  @override
   String get basicPlan => 'Gói miễn phí';
 
   @override
@@ -1472,7 +1467,7 @@ class AppLocalizationsVi extends AppLocalizations {
   String get payYourSttProvider => 'Sử dụng omi tự do. Bạn chỉ trả tiền cho nhà cung cấp STT trực tiếp.';
 
   @override
-  String get freeMinutesMonth => '1.200 phút miễn phí/tháng được bao gồm. Không giới hạn với ';
+  String get freeMinutesMonth => '300 phút miễn phí/tháng được bao gồm. Không giới hạn với ';
 
   @override
   String get omiUnlimited => 'Omi Unlimited';
@@ -2130,16 +2125,16 @@ class AppLocalizationsVi extends AppLocalizations {
   String get editMemory => '✏️ Chỉnh sửa bộ nhớ';
 
   @override
-  String get pinAsBaseline => 'Pin as Baseline';
+  String get pinAsBaseline => 'Ghim làm chuẩn';
 
   @override
-  String get unpinAsBaseline => 'Unpin from Baseline';
+  String get unpinAsBaseline => 'Bỏ ghim khỏi chuẩn';
 
   @override
-  String get baselineMemory => 'Baseline Memory';
+  String get baselineMemory => 'Bộ nhớ chuẩn';
 
   @override
-  String get alwaysInContext => 'Always in context';
+  String get alwaysInContext => 'Luôn trong ngữ cảnh';
 
   @override
   String get memoryContentHint => 'Tôi thích ăn kem...';
@@ -4714,7 +4709,7 @@ class AppLocalizationsVi extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Không có quyền truy cập dữ liệu cụ thể nào được cấu hình.';
 
   @override
-  String get basicPlanDescription => '1.200 phút cao cấp + không giới hạn trên thiết bị';
+  String get basicPlanDescription => '300 phút cao cấp + không giới hạn trên thiết bị';
 
   @override
   String get minutes => 'phút';
@@ -6083,7 +6078,7 @@ class AppLocalizationsVi extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1.200 phút premium/tháng. Tab Trên thiết bị cung cấp phiên âm miễn phí không giới hạn. ';
+      '300 phút premium/tháng. Tab Trên thiết bị cung cấp phiên âm miễn phí không giới hạn. ';
 
   @override
   String get audioProcessedLocally =>
@@ -9767,4 +9762,78 @@ class AppLocalizationsVi extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Không thể kết nối với micrô đó. Hãy đảm bảo micrô đã được kết nối trong Cài đặt iPhone.';
+
+  @override
+  String get syncStatusTooOld => 'Quá cũ để đồng bộ — Omi không thể chấp nhận';
+
+  @override
+  String get planSheetChooseYourPlan => 'Chọn gói của bạn để mở khóa Omi không giới hạn.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Có sẵn trên Mac, di động và web';
+
+  @override
+  String get popularBadge => 'PHỔ BIẾN';
+
+  @override
+  String get worksOnDesktop => 'Hoạt động trên máy tính';
+
+  @override
+  String get noDesktopAccess => 'Không hoạt động trên máy tính';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months tháng / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Miễn phí $count tháng',
+      one: 'Miễn phí 1 tháng',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi miễn phí, nhưng bản miễn phí có những giới hạn ảnh hưởng đến trải nghiệm của bạn:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'Độ trễ 5-7 giây (không theo thời gian thực)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Chuyển xuống bản miễn phí';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Nhận quyền truy cập không giới hạn miễn phí';
+
+  @override
+  String get shareDataForTraining => 'Chia sẻ dữ liệu để huấn luyện';
+
+  @override
+  String get yourRequestUnderReview => 'Yêu cầu của bạn đang được xem xét';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Cần cập nhật';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Cài đặt ứng dụng Omi mới nhất để tiếp tục sau khi di chuyển tài khoản.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Đang di chuyển';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Tài khoản của bạn đang được di chuyển. Các tính năng sản phẩm tạm dừng cho đến khi hoàn tất.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Tài khoản của bạn đang bảo trì sau khi hoàn tác di chuyển. Một số dữ liệu mới hơn có thể bị cô lập.';
+
+  @override
+  String get accountCutoverOpenStore => 'Mở cửa hàng';
 }

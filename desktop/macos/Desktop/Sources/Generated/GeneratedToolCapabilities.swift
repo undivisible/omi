@@ -289,6 +289,7 @@ enum GeneratedToolCapabilities {
       "Use visible=false for parent-linked background work that should not appear as a pill.",
       "The primary coordinator decides in its model loop whether to call spawn_agent. When the current user explicitly asks OpenClaw or Hermes to do work, call spawn_agent in that same turn with that provider; do not delegate that instruction to another agent, use a text-pattern handoff, or narrate that only another chat surface can do it.",
       "Pass provider='openclaw' or provider='hermes' only when the current user explicitly names that provider; otherwise omit provider so Omi starts its regular managed agent.",
+      "Pass toolPolicy.allowedToolNames to restrict which Omi tools the child agent may call; it can only narrow, never widen, the child's tool set.",
       "Inspect progress with list_agent_sessions or get_agent_run."
     ]
     ),
@@ -373,16 +374,15 @@ enum GeneratedToolCapabilities {
     Capability(
       toolName: "save_knowledge_graph",
       title: "Save Knowledge Graph",
-      latency: .fastLocal,
+      latency: .fastNetwork,
       surfaces: Set([.desktopChat]),
       summary: "Save a knowledge graph of entities and relationships extracted from the user's data.",
       bullets: [
-      "Parameters: nodes (array of {id, label, node_type, aliases}), edges (array of {source_id, target_id, label}).",
+      "Prefer discovery_text (raw notes/findings). Backend extract via knowledge_graph SSOT builds nodes/edges; nodes/edges remain accepted for compatibility.",
       "node_type must be one of: person, organization, place, thing, concept.",
       "Use when exploring the user's files during onboarding to build their knowledge graph.",
       "Deduplication is handled automatically; provide all entities you find.",
-      "Use when exploring the user's files during onboarding or knowledge-graph building.",
-      "Deduplication is handled automatically; include all meaningful entities and relationships you found."
+      "Use when exploring the user's files during onboarding or knowledge-graph building."
     ]
     ),
     Capability(
@@ -401,9 +401,10 @@ enum GeneratedToolCapabilities {
       title: "Search Conversations",
       latency: .fastNetwork,
       surfaces: Set([.desktopChat, .realtimeHub]),
-      summary: "Semantic search across the user's past conversations.",
+      summary: "Search the user's past conversations by topic or exact canonical ID/share link.",
       bullets: [
-      "Use for specific topics, decisions, or events discussed in conversations."
+      "Use for specific topics, decisions, or events discussed in conversations.",
+      "For a canonical conversation UUID or https://h.omi.me/conversations/<uuid> link, pass it unchanged for an exact lookup."
     ]
     ),
     Capability(
@@ -424,6 +425,23 @@ enum GeneratedToolCapabilities {
       summary: "Semantic search across user memories.",
       bullets: [
       "Use for a specific personal fact that is not already in the visible user context."
+    ]
+    ),
+    Capability(
+      toolName: "create_memory",
+      title: "Create Memory",
+      latency: .fastNetwork,
+      surfaces: Set([.desktopChat]),
+      summary: "Save one user-provided fact or preference to short-term memory.",
+      bullets: [
+      "Use only when the user explicitly and affirmatively asks you to remember or save the supplied content.",
+      "Do not infer memories from conversation context, and do not call for a negative request such as 'do not remember this'.",
+      "This writes short-term memory through the authorized desktop backend path; it does not promote, edit, or delete long-term memory.",
+      "The current user message must explicitly and affirmatively ask Omi to remember or save the supplied content.",
+      "Pass only the content to remember; do not add inferred facts, categories, tags, or metadata.",
+      "Do not call when the user merely states a fact, asks a question, asks for a suggestion, or says not to remember/save something.",
+      "This is a one-way non-idempotent write. Do not retry automatically after an unknown outcome; tell the user the save status is uncertain.",
+      "The backend stores this as a short-term memory candidate. Do not claim it was promoted to long-term memory."
     ]
     ),
     Capability(

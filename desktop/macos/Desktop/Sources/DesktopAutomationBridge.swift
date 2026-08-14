@@ -3,12 +3,15 @@ import CryptoKit
 import Foundation
 import Network
 import OmiSupport
+import OmiTheme
 import VoiceTurnDomain
 
 enum DesktopAutomationLaunchOptions {
   static let enableFlag = "--automation-bridge"
   static let portPrefix = "--automation-port="
   static let captureRootPrefix = "--automation-capture-root="
+  static let uiPresentationPrefix = "--automation-ui="
+  static let uiPresentationEnvironmentKey = "OMI_AUTOMATION_UI_MODE"
   static let defaultPort: UInt16 = 47777
   static let tokenEnvironmentKey = "OMI_AUTOMATION_TOKEN"
   static let tokenFileEnvironmentKey = "OMI_AUTOMATION_TOKEN_FILE"
@@ -60,6 +63,28 @@ enum DesktopAutomationLaunchOptions {
     }
 
     return defaultPort
+  }
+
+  static var uiPresentationMode: DesktopAutomationUIPresentationMode {
+    uiPresentationMode(
+      allowsLocalAutomation: AppBuild.allowsLocalAutomation,
+      arguments: CommandLine.arguments,
+      environment: ProcessInfo.processInfo.environment)
+  }
+
+  static func uiPresentationMode(
+    allowsLocalAutomation: Bool,
+    arguments: [String],
+    environment: [String: String]
+  ) -> DesktopAutomationUIPresentationMode {
+    guard allowsLocalAutomation else { return .normal }
+    for argument in arguments where argument.hasPrefix(uiPresentationPrefix) {
+      let rawValue = String(argument.dropFirst(uiPresentationPrefix.count)).lowercased()
+      return DesktopAutomationUIPresentationMode(rawValue: rawValue) ?? .normal
+    }
+    let rawValue = environment[uiPresentationEnvironmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines)
+      .lowercased()
+    return rawValue.flatMap(DesktopAutomationUIPresentationMode.init(rawValue:)) ?? .normal
   }
 
   static var token: String {
@@ -122,8 +147,26 @@ struct DesktopAutomationSnapshot: Codable, Sendable {
   var selectedSettingsSection: String?
   var highlightedSettingId: String?
   var usesLegacyHomeDesign: Bool
-  /// Redesigned Home stage mode: `hub`, `chat`, or `connect`. Nil when legacy home or not on Dashboard.
+  /// Home stage mode: `hub`, `chat`, or `connect`. Written only by `DashboardPage`, which is the only
+  /// view that renders the stage; nil whenever nothing on screen has one — which includes the whole
+  /// legacy shell, whose Home is the query surface. Never defaulted: see `HomeStageAutomationPolicy`.
   var homeMode: String?
+  /// `loading`, `legacy`, or `chat_first`; never a local rollout preference.
+  var shellVariant: String?
+  /// Stable typed route for the Chat-first shell. Nil for the legacy shell.
+  var chatFirstRoute: String?
+  /// Set only by the mounted Chat-first destination after it has appeared. This
+  /// keeps a successful navigation response equivalent to the target being
+  /// visible, rather than merely accepted by the root reducer.
+  var visibleChatFirstRoute: String?
+  /// Shape-only focus telemetry for route acknowledgement; entity IDs stay local.
+  var pendingFocusKind: String?
+  var acknowledgedFocusKind: String?
+  /// The focused entity is available only through the local non-production
+  /// bridge so named-bundle probes can prove the acknowledgement target. It is
+  /// never an analytics dimension or a persisted navigation value.
+  var focusedEntityID: String?
+  var isFocusedEntityAcknowledged: Bool
   var showsPrimarySidebar: Bool
   var isSidebarCollapsed: Bool
   var hasCompletedOnboarding: Bool
@@ -144,14 +187,6 @@ struct DesktopAutomationSnapshot: Codable, Sendable {
   /// read during sign-in. The bridge still answers `/state` so harnesses don't
   /// hang; callers can detect that the live fields may be stale.
   var snapshotStale: Bool = false
-}
-
-struct DesktopAutomationNavigationRequest: Codable {
-  let target: String
-  let settingsSection: String?
-  let highlightedSettingId: String?
-  let activateApp: Bool?
-  let settleMs: Int?
 }
 
 struct DesktopAutomationOpenConversationRequest: Codable {
@@ -431,6 +466,13 @@ final class DesktopAutomationStateStore {
     highlightedSettingId: nil,
     usesLegacyHomeDesign: false,
     homeMode: nil,
+    shellVariant: nil,
+    chatFirstRoute: nil,
+    visibleChatFirstRoute: nil,
+    pendingFocusKind: nil,
+    acknowledgedFocusKind: nil,
+    focusedEntityID: nil,
+    isFocusedEntityAcknowledged: false,
     showsPrimarySidebar: false,
     isSidebarCollapsed: true,
     hasCompletedOnboarding: false,
@@ -517,7 +559,7 @@ func awaitWithTimeout<T: Sendable>(
   }
 }
 
-private func liveAutomationSnapshot() async -> DesktopAutomationSnapshot {
+func liveAutomationSnapshot() async -> DesktopAutomationSnapshot {
   // Bound the MainActor hop: if the main thread is wedged (blocking Keychain read
   // during sign-in), fall back to the last cached snapshot so `/state` still
   // answers instead of hanging the whole bridge. See awaitWithTimeout.
@@ -560,7 +602,7 @@ private func liveAutomationSnapshotFromMainActor() async -> DesktopAutomationSna
   }
 }
 
-private func cachedAutomationSnapshot() async -> DesktopAutomationSnapshot {
+func cachedAutomationSnapshot() async -> DesktopAutomationSnapshot {
   var snapshot = DesktopAutomationStateStore.shared.current()
   snapshot.updatedAt = ISO8601DateFormatter().string(from: Date())
   return snapshot
@@ -694,9 +736,7 @@ final class DesktopAutomationActionRegistry {
       run: handler)
   }
 
-  func unregister(_ name: String) {
-    entries[name] = nil
-  }
+  func unregister(_ name: String) { entries[name] = nil }
 
   func descriptors() -> [DesktopAutomationActionDescriptor] {
     entries.values.map(\.descriptor).sorted { $0.name < $1.name }
@@ -716,6 +756,46 @@ final class DesktopAutomationActionRegistry {
     guard !didRegisterBuiltins else { return }
     didRegisterBuiltins = true
     registerOpenOmiShortcutActionsForQA()
+    register(
+      name: "set_automation_ui_presentation",
+      summary:
+        "Park automation windows quietly, reveal them briefly for Accessibility, or restore normal user presentation",
+      params: ["mode", "activate"],
+      category: "app_control",
+      surfaces: ["app"],
+      safety: "local_ui_state",
+      sideEffects: ["changes non-production window placement and input handling"],
+      examples: [
+        "./scripts/omi-ctl ui quiet",
+        "./scripts/omi-ctl ui interactive --activate",
+        "./scripts/omi-ctl ui normal --activate",
+      ]
+    ) { params in
+      // This registry is reachable only through DesktopAutomationBridge, whose listener cannot start
+      // for production-family or published-preview bundles. Keep the handler itself exercisable in a
+      // hermetic test instead of duplicating the bridge's stronger process boundary here.
+      guard let requested = params["mode"]?.lowercased() else {
+        return [
+          "mode": DesktopAutomationWindowPresentation.currentMode.rawValue,
+          "available_modes": DesktopAutomationUIPresentationMode.allCases.map(\.rawValue).joined(
+            separator: ","),
+        ]
+      }
+      guard let mode = DesktopAutomationUIPresentationMode(rawValue: requested) else {
+        throw DesktopAutomationActionError.invalidParams(
+          "mode must be normal, quiet, or interactive")
+      }
+      let activate = boolParam(params["activate"], default: false)
+      let previous = DesktopAutomationWindowPresentation.setMode(mode, activate: activate)
+      return [
+        "previous_mode": previous.rawValue,
+        "mode": DesktopAutomationWindowPresentation.currentMode.rawValue,
+        "activated": activate ? "true" : "false",
+      ]
+    }
+    // The five cursor-free Home-stage drivers, together because they share a failure mode:
+    // see DesktopAutomationHomeStageActions.swift.
+    registerHomeStageActions()
     register(
       name: "refresh_all_data",
       summary: "Refresh conversations, chat, tasks, and memories (same as Cmd+R)"
@@ -782,7 +862,6 @@ final class DesktopAutomationActionRegistry {
         "window": window.map { $0.title.isEmpty ? "untitled" : $0.title } ?? "none",
       ]
     }
-
     // CHAT-05: read the free-tier monthly chat usage-limiter state so a harness can
     // prove the counter is deterministic without spending LLM calls. Read-only.
     register(
@@ -818,7 +897,6 @@ final class DesktopAutomationActionRegistry {
         ]
       }
     }
-
     register(
       name: "task_capture_fixture",
       summary: "Evaluate canonical screen-capture policy facts without screenshot bytes",
@@ -856,8 +934,7 @@ final class DesktopAutomationActionRegistry {
       summary: "Configure the non-production contextual task interruption gate",
       params: [
         "enabled", "shipped_cohorts_enabled", "daily_limit", "minimum_spacing_seconds",
-        "quiet_start_minute", "quiet_end_minute", "notifications_enabled", "frequency",
-        "task_notifications_enabled",
+        "notifications_enabled", "frequency", "task_notifications_enabled",
       ]
     ) { params in
       var configuration = ProactiveTaskInterruptionSettings.load()
@@ -868,12 +945,6 @@ final class DesktopAutomationActionRegistry {
       configuration.minimumSpacing = TimeInterval(
         max(
           0, intParam(params["minimum_spacing_seconds"], default: Int(configuration.minimumSpacing))))
-      configuration.quietHoursStartMinute = min(
-        max(
-          0, intParam(params["quiet_start_minute"], default: configuration.quietHoursStartMinute)), 1439)
-      configuration.quietHoursEndMinute = min(
-        max(
-          0, intParam(params["quiet_end_minute"], default: configuration.quietHoursEndMinute)), 1439)
       ProactiveTaskInterruptionSettings.save(configuration)
       if params["notifications_enabled"] != nil {
         UserDefaults.standard.set(
@@ -931,6 +1002,25 @@ final class DesktopAutomationActionRegistry {
     }
 
     register(
+      name: "probe_suggestion_nudge",
+      summary: "Run the real suggestion grounding/evaluation/delivery path on the latest frame",
+      params: ["app", "window_title"],
+      safety: "network_or_model",
+      sideEffects: [
+        "may call model/backend services",
+        "may deliver a user-visible suggestion when notification controls allow",
+      ]
+    ) { params in
+      let app = params["app"].flatMap { $0.isEmpty ? nil : $0 }
+      let title = params["window_title"].flatMap { $0.isEmpty ? nil : $0 }
+      return await ProactiveAssistantsPlugin.shared.probeSuggestionNudge(
+        appOverride: app,
+        windowTitleOverride: title
+      )
+    }
+
+    registerContextBucketDirectorProbe()
+    register(
       name: "set_contextual_task_focus",
       summary: "Set deterministic focus suppression for contextual task interruptions",
       params: ["suppressed"]
@@ -976,7 +1066,7 @@ final class DesktopAutomationActionRegistry {
       else {
         throw DesktopAutomationActionError.invalidParams("context event could not be normalized")
       }
-      let matched = TaskContextSubjectMatcher.shared.resolve(event)
+      let matched = await ContextSubjectBindingService.shared.resolve(event)
       let referenceHash = matched.referenceHash
       await TaskContextualResurfacingService.shared.observe(matched)
       let shouldFlush = boolParam(params["flush"], default: true)
@@ -1142,7 +1232,7 @@ final class DesktopAutomationActionRegistry {
           "message": message,
           "memories": "\(result.memoryCount ?? 0)",
         ]
-      case .failure(let message):
+      case .failure(let message, failureClass: _):
         return ["outcome": "failure", "message": message]
       }
     }
@@ -1153,9 +1243,7 @@ final class DesktopAutomationActionRegistry {
       params: ["enabled"]
     ) { params in
       let enabled = boolParam(params["enabled"], default: true)
-      AssistantSettings.shared.transcriptionEnabled = enabled
-      NotificationCenter.default.post(
-        name: .toggleTranscriptionRequested, object: nil, userInfo: ["enabled": enabled])
+      AssistantSettings.shared.audioRecordingMode = enabled ? .onlyMeetings : .off
       return ["enabled": enabled ? "true" : "false"]
     }
 
@@ -1174,6 +1262,8 @@ final class DesktopAutomationActionRegistry {
       case "inject_multi":
         return await appState.automationInjectCaptureTestTranscriptMulti(
           segmentsJSON: params["segments"] ?? params["text"] ?? "")
+      case "meeting_start", "meeting_end":
+        return ["conversation_role": appState.automationObserveMeetingBoundary(active: phase == "meeting_start")]
       case "stop":
         return await appState.automationStopCaptureTestSession()
       case "lifecycle":
@@ -1185,7 +1275,7 @@ final class DesktopAutomationActionRegistry {
         _ = await appState.automationInjectCaptureTestTranscript(text: marker)
         return await appState.automationStopCaptureTestSession()
       default:
-        return ["error": "phase must be start, inject, inject_multi, stop, or lifecycle"]
+        return ["error": "phase must be start, inject, inject_multi, meeting_start, meeting_end, stop, or lifecycle"]
       }
     }
 
@@ -1485,16 +1575,19 @@ final class DesktopAutomationActionRegistry {
 
     register(
       name: "sign_out",
-      summary: "Sign out via AuthService (local Auth emulator harness only)"
-    ) { _ in
+      summary: "Sign out via AuthService (local Auth emulator harness only)",
+      params: ["accepted_account_deletion"]
+    ) { params in
       guard DesktopLocalProfile.isEnabled else {
         return ["error": "sign_out is only available with OMI_DESKTOP_LOCAL_PROFILE=1 (local Auth emulator)"]
       }
+      let acceptedAccountDeletion = boolParam(params["accepted_account_deletion"], default: false)
       guard AuthState.shared.isSignedIn else {
         return ["signed_out": "true", "was_signed_in": "false"]
       }
-      try await AuthService.shared.signOut()
+      try await AuthService.shared.signOut(acceptedAccountDeletion: acceptedAccountDeletion)
       return [
+        "accepted_account_deletion": acceptedAccountDeletion ? "true" : "false",
         "signed_out": "true",
         "was_signed_in": "true",
         "is_signed_in": AuthState.shared.isSignedIn ? "true" : "false",
@@ -1522,59 +1615,6 @@ final class DesktopAutomationActionRegistry {
     ) { params in
       let wait = boolParam(params["wait"], default: true)
       return await FloatingControlBarManager.shared.closeAskOmiForAutomation(wait: wait)
-    }
-
-    // Drive the redesigned Home stage (inline chat / connect tray) without the
-    // cursor. Each posts the notification DashboardPage observes, which calls
-    // the exact functions the on-screen controls call.
-    register(
-      name: "home_open_chat",
-      summary: "Open the inline chat on Home (same path as clicking the ask bar)"
-    ) { _ in
-      NotificationCenter.default.post(name: .homeStageOpenChat, object: nil)
-      return nil
-    }
-
-    register(
-      name: "home_connect_toggle",
-      summary: "Toggle the Connect tray on Home (same path as the ask-bar Connect button)"
-    ) { _ in
-      NotificationCenter.default.post(name: .homeStageToggleConnect, object: nil)
-      return nil
-    }
-
-    register(
-      name: "home_close_panel",
-      summary: "Collapse Home back to its resting surface (same as Esc / the close buttons)"
-    ) { _ in
-      NotificationCenter.default.post(name: .homeStageClose, object: nil)
-      return nil
-    }
-
-    register(
-      name: "home_ask",
-      summary: "Send a query through the Home ask bar (opens the inline chat and sends)",
-      params: ["query"]
-    ) { params in
-      let query = (params["query"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !query.isEmpty else { return ["error": "missing 'query'"] }
-      NotificationCenter.default.post(
-        name: .homeStageAsk, object: nil, userInfo: ["query": query])
-      return ["sent": query]
-    }
-
-    register(
-      name: "home_attach",
-      summary: "Stage a file in the Home ask bar (same wiring as the paperclip/drag-drop)",
-      params: ["path"]
-    ) { params in
-      let path = (params["path"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-      guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
-        return ["error": "missing or nonexistent 'path'"]
-      }
-      NotificationCenter.default.post(
-        name: .homeStageAttach, object: nil, userInfo: ["path": path])
-      return ["staged": path]
     }
 
     register(
@@ -1636,6 +1676,70 @@ final class DesktopAutomationActionRegistry {
       return ["shown": "true"]
     }
 
+    // Cursor-free click diagnosis: report which window (any app's) is topmost at a screen point,
+    // and — when it is one of ours — the exact view AppKit hit-tests there. Exists because "I
+    // click X and nothing happens" is otherwise undiagnosable without synthesizing real clicks.
+    register(
+      name: "debug_hit_probe",
+      summary: "Report topmost window + hit-tested view at screen point (top-left coords)",
+      params: ["x", "y"]
+    ) { params in
+      guard let x = Double(params["x"] ?? ""), let y = Double(params["y"] ?? "") else {
+        return ["error": "need x and y (screen top-left coords)"]
+      }
+      guard let primary = NSScreen.screens.first else { return ["error": "no screens"] }
+      let cocoaPoint = NSPoint(x: x, y: primary.frame.maxY - y)
+      var result: [String: String] = [
+        "screen_point_cg": "(\(Int(x)), \(Int(y)))",
+        "screen_point_cocoa": NSStringFromPoint(cocoaPoint),
+        "screens": NSScreen.screens.map { NSStringFromRect($0.frame) }.joined(separator: " | "),
+      ]
+      // Our own windows containing the point, front-to-back. Reliable where the window-server
+      // query is not; foreign overlap is diagnosed from outside via CGWindowList.
+      let containing = NSApp.windows
+        .filter { $0.isVisible && $0.frame.contains(cocoaPoint) }
+        .sorted { $0.orderedIndex < $1.orderedIndex }
+      result["own_windows_at_point"] =
+        containing.isEmpty
+        ? "none"
+        : containing.map { window in
+          var extras = ""
+          let local = NSPoint(
+            x: cocoaPoint.x - window.frame.minX, y: cocoaPoint.y - window.frame.minY)
+          if let bar = window as? FloatingControlBarWindow {
+            extras =
+              " acceptsHit=\(bar.automationAcceptsMouseHit(inContentPoint: local)) ignores=\(window.ignoresMouseEvents)"
+          } else {
+            // Shell click-through verdict (ShellClickThrough.swift): whether this point owns the
+            // pointer, per the same policy the ignoresMouseEvents sync runs.
+            let accepts = ShellClickThroughPolicy.acceptsMouseHit(
+              localPoint: local,
+              windowSize: window.frame.size,
+              isResizable: window.styleMask.contains(.resizable),
+              contentContains: { InkGlassHitRegions.shared.containsPoint($0, in: window) })
+            extras = " shellAccepts=\(accepts) ignores=\(window.ignoresMouseEvents)"
+          }
+          return
+            "\(String(describing: type(of: window)))(\"\(window.title)\" level=\(window.level.rawValue) key=\(window.isKeyWindow) idx=\(window.orderedIndex)\(extras))"
+        }.joined(separator: " ; ")
+      if let window = containing.first {
+        let inWindow = window.convertPoint(fromScreen: cocoaPoint)
+        result["point_in_window"] = NSStringFromPoint(inWindow)
+        if let root = window.contentView?.superview ?? window.contentView {
+          let inRoot = root.convert(inWindow, from: nil)
+          let hit = root.hitTest(inRoot)
+          var chain: [String] = []
+          var view = hit
+          while let v = view, chain.count < 8 {
+            chain.append(String(describing: type(of: v)))
+            view = v.superview
+          }
+          result["hit_view_chain"] = chain.isEmpty ? "nil (click falls through)" : chain.joined(separator: " < ")
+        }
+      }
+      return result
+    }
+
     register(
       name: "reset_main_chat",
       summary: "Clear main-window chat messages and start a fresh session (harness flow isolation)",
@@ -1671,7 +1775,7 @@ final class DesktopAutomationActionRegistry {
       ]
     }
 
-    // Send a message through the real main-window chat pipeline (ChatPage),
+    // Send a message through the real main-window chat pipeline (Home),
     // in-process via ViewModelContainer's ChatProvider — no synthetic mouse
     // or keyboard input, so it never touches the user's actual cursor.
     register(
@@ -1684,11 +1788,24 @@ final class DesktopAutomationActionRegistry {
       guard let provider = ChatProvider.mainInstance else {
         return ["error": "main ChatProvider not yet initialized"]
       }
+      // Report the provider's own admission decision. This used to answer
+      // `sent` unconditionally, so a send the busy guard refused was reported
+      // as delivered and the refusal was invisible to every harness.
+      guard provider.canAcceptSend else {
+        return [
+          "accepted": "false",
+          "busy": "true",
+          "is_sending": provider.isSending ? "true" : "false",
+          "is_streaming": provider.messages.contains(where: { $0.isStreaming }) ? "true" : "false",
+          "reason": "already_sending",
+          "query": query,
+        ]
+      }
       let tracer = QueryTracer(query: query, inputMode: .text)
       await QueryTracerContext.$current.withValue(tracer) {
         _ = await provider.sendMessage(query)
       }
-      return ["sent": query]
+      return ["accepted": "true", "sent": query]
     }
 
     // Fire-and-forget main-chat send for race/busy probes. Returns before the
@@ -2070,7 +2187,8 @@ final class DesktopAutomationActionRegistry {
 
         let status = await AppleNotesReaderService.shared.connectionStatus(
           maxResults: maxResults,
-          selectedFolderPath: selectedFolderPath
+          selectedFolderPath: selectedFolderPath,
+          userInitiated: true
         )
         switch status {
         case .connected(let noteCount, _):
@@ -2137,7 +2255,7 @@ final class DesktopAutomationActionRegistry {
     register(
       name: "capture_main_window_png",
       summary: "Write PNG of the frontmost Omi window (in-process capture)",
-      params: ["path"]
+      params: ["path", "surface"]
     ) { params in
       guard let path = params["path"], !path.isEmpty else {
         return ["error": "missing 'path'"]
@@ -2146,10 +2264,14 @@ final class DesktopAutomationActionRegistry {
         guard
           let window = NSApp.windows.first(where: {
             $0.isVisible && $0.title.range(of: "omi", options: .caseInsensitive) != nil
-          }),
-          let contentView = window.contentView
+          })
         else {
           return ["error": "no_visible_window"]
+        }
+        let requestedSheet = params["surface"] == "sheet"
+        let captureWindow = requestedSheet ? (window.attachedSheet ?? window) : window
+        guard let contentView = captureWindow.contentView else {
+          return ["error": "no_content_view"]
         }
         let bounds = contentView.bounds
         guard let rep = contentView.bitmapImageRepForCachingDisplay(in: bounds) else {
@@ -2161,7 +2283,26 @@ final class DesktopAutomationActionRegistry {
         }
         do {
           try data.write(to: URL(fileURLWithPath: path))
-          return ["path": path, "bytes": "\(data.count)"]
+          var result = [
+            "path": path,
+            "bytes": "\(data.count)",
+            "captured_surface": requestedSheet && window.attachedSheet != nil ? "sheet" : "window",
+            "frame_x": "\(Int(window.frame.origin.x.rounded()))",
+            "frame_y": "\(Int(window.frame.origin.y.rounded()))",
+            "frame_width": "\(Int(window.frame.width.rounded()))",
+            "frame_height": "\(Int(window.frame.height.rounded()))",
+            "backing_scale": String(format: "%.1f", window.backingScaleFactor),
+          ]
+          if let sheet = window.attachedSheet {
+            result["has_sheet"] = "true"
+            result["sheet_frame_x"] = "\(Int(sheet.frame.origin.x.rounded()))"
+            result["sheet_frame_y"] = "\(Int(sheet.frame.origin.y.rounded()))"
+            result["sheet_frame_width"] = "\(Int(sheet.frame.width.rounded()))"
+            result["sheet_frame_height"] = "\(Int(sheet.frame.height.rounded()))"
+          } else {
+            result["has_sheet"] = "false"
+          }
+          return result
         } catch {
           return ["error": error.localizedDescription]
         }
@@ -2442,7 +2583,8 @@ final class DesktopAutomationActionRegistry {
         let events = try await CalendarReaderService.shared.readEvents(
           daysBack: normalized.daysBack,
           daysForward: normalized.daysForward,
-          maxResults: normalized.maxResults
+          maxResults: normalized.maxResults,
+          userInitiated: true
         )
         return [
           "status": "connected",
@@ -2494,7 +2636,8 @@ final class DesktopAutomationActionRegistry {
       do {
         let emails = try await GmailReaderService.shared.readRecentEmails(
           maxResults: maxResults,
-          query: query
+          query: query,
+          userInitiated: true
         )
         return [
           "status": "connected",
@@ -3049,17 +3192,62 @@ final class DesktopAutomationActionRegistry {
     }
 
     register(
-      name: "memory_graph_snapshot",
-      summary: "Return knowledge graph node/edge counts (no SceneKit rendering)",
+      name: "memory_graph_rebuild",
+      summary:
+        "Regenerate the server-side knowledge graph from the signed-in account's memories",
       params: []
     ) { _ in
+      // Mutating and not undoable: the backend deletes the stored graph before
+      // the background rebuild runs, so a caller that loses the race sees an
+      // empty graph. Exposed for cursor-free QA of the Brain Map's own rebuild
+      // control, which is otherwise only reachable by clicking.
+      do {
+        let response = try await APIClient.shared.rebuildKnowledgeGraph()
+        return [
+          "status": response.status,
+          "nodes_count": "\(response.nodesCount ?? 0)",
+          "edges_count": "\(response.edgesCount ?? 0)",
+        ]
+      } catch {
+        return [
+          "has_error": "true",
+          "error_message": error.localizedDescription,
+        ]
+      }
+    }
+
+    register(
+      name: "memory_graph_snapshot",
+      summary: "Return knowledge graph node/edge counts (no SceneKit rendering)",
+      params: ["label"]
+    ) { params in
       do {
         let graph = try await APIClient.shared.getKnowledgeGraph()
-        return [
+        let atlas = MemoryAtlasProjection(graph: graph.atlasResponse, userName: nil)
+        var detail = [
           "node_count": "\(graph.nodes.count)",
           "edge_count": "\(graph.edges.count)",
+          "catalog_memory_count": "\(graph.catalogNodes?.count ?? 0)",
+          "atlas_mark_count": "\(atlas.snapshot.nodes.count)",
           "is_empty": graph.nodes.isEmpty ? "true" : "false",
         ]
+        // A label resolves to the ids and citations the inspector needs.
+        if let query = params["label"]?.lowercased(), !query.isEmpty {
+          if let match = graph.nodes.first(where: { $0.label.lowercased().contains(query) }) {
+            let edges = graph.edges.filter { $0.sourceId == match.id || $0.targetId == match.id }
+            detail["match_id"] = match.id
+            detail["match_label"] = match.label
+            detail["match_edge_count"] = "\(edges.count)"
+            detail["match_cited_memory_count"] = "\(Set(edges.flatMap(\.memoryIds)).count)"
+            if let first = edges.first {
+              detail["match_first_edge_id"] = first.id
+              detail["match_first_edge_memory_count"] = "\(first.memoryIds.count)"
+            }
+          } else {
+            detail["match_id"] = ""
+          }
+        }
+        return detail
       } catch {
         return [
           "node_count": "0",
@@ -3069,6 +3257,138 @@ final class DesktopAutomationActionRegistry {
           "error_message": error.localizedDescription,
         ]
       }
+    }
+
+    register(
+      name: "memory_atlas_select",
+      summary: "Select a Brain Map entity or connection so the inspector can be checked cursor-free",
+      params: ["target", "node_id", "label", "edge_id", "clear"]
+    ) { params in
+      let target = params["target"] == "inline" ? "inline" : "page"
+      var userInfo: [String: Any] = ["target": target]
+      if let nodeID = params["node_id"], !nodeID.isEmpty { userInfo["node_id"] = nodeID }
+      if let label = params["label"], !label.isEmpty { userInfo["label"] = label }
+      if let edgeID = params["edge_id"], !edgeID.isEmpty { userInfo["edge_id"] = edgeID }
+      if params["clear"] == "true" { userInfo["clear"] = true }
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: .desktopAutomationMemoryAtlasSelectRequested,
+          object: nil,
+          userInfo: userInfo
+        )
+      }
+      return [
+        "posted": "true",
+        "target": target,
+        "node_id": params["node_id"] ?? "",
+        "label": params["label"] ?? "",
+        "edge_id": params["edge_id"] ?? "",
+        "clear": params["clear"] ?? "false",
+      ]
+    }
+
+    register(
+      name: "memories_open_detail",
+      summary: "Open a memory's detail panel by backend id (omit the id to close it)",
+      params: ["memory_id"]
+    ) { params in
+      let memoryId = params["memory_id"] ?? ""
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: .desktopAutomationMemoryDetailOpenRequested,
+          object: nil,
+          userInfo: memoryId.isEmpty ? [:] : ["memory_id": memoryId]
+        )
+      }
+      return ["posted": "true", "memory_id": memoryId]
+    }
+
+    register(
+      name: "open_memory_atlas",
+      summary: "Open the canonical memory atlas page for non-production UI and performance harnesses"
+    ) { _ in
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: .desktopAutomationOpenMemoryAtlasRequested,
+          object: nil
+        )
+      }
+      return ["opened": "true", "target": "page"]
+    }
+
+    register(
+      name: "memory_atlas_set_viewport",
+      summary: "Set memory atlas zoom and pan for deterministic non-production performance sweeps",
+      params: ["target", "zoom", "pan_x", "pan_y", "reset"]
+    ) { params in
+      let target = params["target"] == "inline" ? "inline" : "page"
+      var userInfo: [String: Any] = ["target": target]
+      if let zoom = params["zoom"].flatMap(Double.init) { userInfo["zoom"] = zoom }
+      if let panX = params["pan_x"].flatMap(Double.init) { userInfo["pan_x"] = panX }
+      if let panY = params["pan_y"].flatMap(Double.init) { userInfo["pan_y"] = panY }
+      if let reset = params["reset"] { userInfo["reset"] = reset == "true" }
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: .desktopAutomationMemoryAtlasViewportRequested,
+          object: nil,
+          userInfo: userInfo
+        )
+      }
+      return [
+        "posted": "true",
+        "target": target,
+        "zoom": params["zoom"] ?? "unchanged",
+        "pan_x": params["pan_x"] ?? "unchanged",
+        "pan_y": params["pan_y"] ?? "unchanged",
+      ]
+    }
+
+    register(
+      name: "memory_atlas_enter_region",
+      summary: "Go into a Brain Map neighbourhood by caption, or leave the one you are in",
+      params: ["target", "caption", "leave"]
+    ) { params in
+      let target = params["target"] == "inline" ? "inline" : "page"
+      var userInfo: [String: Any] = ["target": target]
+      if let caption = params["caption"] { userInfo["caption"] = caption }
+      if let leave = params["leave"] { userInfo["leave"] = leave == "true" }
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: .desktopAutomationMemoryAtlasRegionRequested,
+          object: nil,
+          userInfo: userInfo
+        )
+      }
+      return [
+        "posted": "true", "target": target,
+        "caption": params["caption"] ?? "", "leave": params["leave"] ?? "false",
+      ]
+    }
+
+    register(
+      name: "memory_atlas_set_time",
+      summary: "Scrub or play the memory atlas time axis for deterministic non-production checks",
+      params: ["target", "fraction", "play", "reset_to_start", "reset"]
+    ) { params in
+      let target = params["target"] == "inline" ? "inline" : "page"
+      var userInfo: [String: Any] = ["target": target]
+      if let fraction = params["fraction"].flatMap(Double.init) { userInfo["fraction"] = fraction }
+      if let play = params["play"] { userInfo["play"] = play == "true" }
+      if let resetToStart = params["reset_to_start"] { userInfo["reset_to_start"] = resetToStart == "true" }
+      if let reset = params["reset"] { userInfo["reset"] = reset == "true" }
+      await MainActor.run {
+        NotificationCenter.default.post(
+          name: .desktopAutomationMemoryAtlasTimeRequested,
+          object: nil,
+          userInfo: userInfo
+        )
+      }
+      return [
+        "posted": "true",
+        "target": target,
+        "fraction": params["fraction"] ?? "unchanged",
+        "play": params["play"] ?? "unchanged",
+      ]
     }
 
     register(
@@ -3105,6 +3425,7 @@ final class DesktopAutomationActionRegistry {
       let hasPermission = appState?.hasNotificationPermission ?? false
       let bannersDisabled = appState?.isNotificationBannerDisabled ?? false
       return [
+        "schema": "enabled,frequency,frequency_label,has_permission,banners_disabled",
         "enabled": settings.enabled ? "true" : "false",
         "frequency": "\(settings.frequency)",
         "frequency_label": settings.frequencyDescription,
@@ -3124,6 +3445,12 @@ final class DesktopAutomationActionRegistry {
         enabled: enabled,
         frequency: frequency
       )
+      UserDefaults.standard.set(
+        response.enabled,
+        forKey: NotificationService.masterEnabledDefaultsKey)
+      UserDefaults.standard.set(
+        response.frequency,
+        forKey: NotificationService.frequencyDefaultsKey)
       return [
         "saved": "true",
         "enabled": response.enabled ? "true" : "false",
@@ -3187,19 +3514,18 @@ final class DesktopAutomationActionRegistry {
       summary: "Return safe Advanced settings booleans (never raw BYOK keys)",
       params: []
     ) { _ in
-      let focus = FocusAssistantSettings.shared
       let task = TaskAssistantSettings.shared
       let insight = InsightAssistantSettings.shared
       let memory = MemoryAssistantSettings.shared
       let assistant = AssistantSettings.shared
       return [
-        "focus_enabled": focus.isEnabled ? "true" : "false",
         "task_enabled": task.isEnabled ? "true" : "false",
         "task_chat_agent_enabled": TaskAgentSettings.shared.isChatEnabled ? "true" : "false",
         "insight_enabled": insight.isEnabled ? "true" : "false",
         "memory_enabled": memory.isEnabled ? "true" : "false",
         "screen_analysis_enabled": assistant.screenAnalysisEnabled ? "true" : "false",
-        "transcription_enabled": assistant.transcriptionEnabled ? "true" : "false",
+        "transcription_enabled": assistant.audioRecordingMode != .off ? "true" : "false",
+        "audio_recording_mode": assistant.audioRecordingMode.rawValue,
         "multi_chat_enabled": UserDefaults.standard.bool(forKey: .multiChatEnabled) ? "true" : "false",
       ]
     }
@@ -3760,8 +4086,8 @@ final class DesktopAutomationBridge: @unchecked Sendable {
         let payload = try JSONDecoder().decode(
           DesktopAutomationNavigationRequest.self, from: request.body)
         try await dispatchNavigation(payload)
+        let snapshot = try await navigationSnapshot(for: payload)
         try await sleepForAutomationSettle(payload.settleMs)
-        let snapshot = await cachedAutomationSnapshot()
         return jsonResponse(DesktopAutomationResponse(ok: true, result: snapshot, error: nil))
       } catch {
         return jsonResponse(
@@ -3975,16 +4301,16 @@ final class DesktopAutomationBridge: @unchecked Sendable {
   }
 
   private func dispatchNavigation(_ payload: DesktopAutomationNavigationRequest) async throws {
-    await activateMainWindowIfNeeded(payload.activateApp ?? true)
+    let activateApp = DesktopAutomationNavigationDelivery.resolvesActivation(
+      explicit: payload.activateApp)
+    await activateMainWindowIfNeeded(activateApp)
     await MainActor.run {
       NotificationCenter.default.post(
         name: .desktopAutomationNavigateRequested,
         object: nil,
-        userInfo: [
-          "target": payload.target,
-          "settingsSection": payload.settingsSection as Any,
-          "highlightedSettingId": payload.highlightedSettingId as Any,
-        ]
+        userInfo: DesktopAutomationNavigationDelivery.userInfo(
+          for: payload,
+          activateApp: activateApp)
       )
     }
   }
@@ -4005,7 +4331,8 @@ final class DesktopAutomationBridge: @unchecked Sendable {
   }
 
   private func dispatchOpenConversation(_ payload: DesktopAutomationOpenConversationRequest) async throws {
-    await activateMainWindowIfNeeded(payload.activateApp ?? true)
+    await activateMainWindowIfNeeded(
+      DesktopAutomationNavigationDelivery.resolvesActivation(explicit: payload.activateApp))
     try await ensureConversationsTabVisibleForAutomation()
     await requestAutomationConversationOpen(
       conversationId: payload.conversationId,

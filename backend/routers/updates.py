@@ -10,7 +10,7 @@ from typing import Any, Optional, List, Dict, Literal, Tuple
 from xml.sax.saxutils import escape as xml_escape
 
 from fastapi import APIRouter, HTTPException, Header, Query
-from fastapi.responses import RedirectResponse, Response, HTMLResponse
+from fastapi.responses import Response, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from database.desktop_previews import delist_preview, get_current_preview, get_preview_manifest, publish_preview
@@ -29,8 +29,8 @@ from database.redis_db import delete_generic_cache
 from utils.desktop_update_resolver import live_cache_key, resolve_pointer_release
 from utils.executors import db_executor, run_blocking
 from utils.github_releases import get_omi_github_releases, extract_key_value_pairs
-from utils.qualified_beta_promotion import QualifiedBetaAdmissionError, build_qualified_beta_manifest
-from utils.beta_breakglass_evidence import build_emergency_beta_manifest
+from utils.beta_candidate_evidence import BetaCandidateAdmissionError
+from utils.beta_breakglass_evidence import build_emergency_beta_manifest, build_signed_beta_manifest
 from utils.metrics import (
     DESKTOP_UPDATE_FEED_VALID,
     DESKTOP_UPDATE_POINTER_MISMATCH_TOTAL,
@@ -60,6 +60,15 @@ class DesktopUpdatePolicyResponse(BaseModel):
     )
 
 
+class DesktopWindowsUpdateFeedResponse(BaseModel):
+    """Platform-scoped electron-updater feed selected by the backend."""
+
+    requested_channel: Literal["beta", "stable"]
+    served_channel: Literal["beta", "stable"]
+    version: str
+    feed_url: str
+
+
 class ClearCacheResponse(BaseModel):
     """Ack for clearing the desktop releases cache."""
 
@@ -76,12 +85,12 @@ class DesktopChannelPromotionRequest(BaseModel):
     operation: Literal["promote", "repoint"] = "promote"
 
 
-class QualifiedBetaPromotionRequest(BaseModel):
+class BetaCandidatePromotionRequest(BaseModel):
     """The caller can name one immutable macOS candidate and nothing else."""
 
     model_config = ConfigDict(extra="forbid")
 
-    tag: str = Field(pattern=r"^v[0-9]+\.[0-9]+(?:\.[0-9]+)?\+[1-9][0-9]*-macos$")
+    tag: str = Field(pattern=r"^v[0-9]+\.[0-9]+\.[0-9]+\+[1-9][0-9]*-macos$")
 
 
 class BetaAdmissionControlRequest(BaseModel):
@@ -355,6 +364,17 @@ def _get_windows_installer_download_url(release: Dict) -> Optional[str]:
     return None
 
 
+def _get_windows_update_feed_url(release: Dict) -> Optional[str]:
+    """Return the immutable GitHub directory containing one Windows latest.yml."""
+    tag_name = release.get("tag_name", "")
+    version_info = _parse_desktop_version(tag_name)
+    if not version_info or not tag_name.lower().endswith("-windows"):
+        return None
+    if not any(asset.get("name") == "latest.yml" for asset in release.get("assets", [])):
+        return None
+    return f"https://github.com/BasedHardware/omi/releases/download/{tag_name}/"
+
+
 def _get_installer_download_url(release: Dict, platform: str) -> Optional[str]:
     """Resolve the manual-download installer asset for one platform."""
     if platform == "windows":
@@ -572,6 +592,17 @@ def _pick_installer_entry(desktop_releases: List[Dict], platform: str, channel: 
         installer_url = _get_installer_download_url(entry["release"], platform)
         if installer_url:
             return entry, installer_url
+    return None
+
+
+def _pick_windows_update_feed_entry(entries: List[Dict], channel: str) -> Optional[Tuple[Dict, str]]:
+    """Pick the newest release in one channel that carries updater metadata."""
+    for entry in entries:
+        if entry["channel"] != channel:
+            continue
+        feed_url = _get_windows_update_feed_url(entry["release"])
+        if feed_url:
+            return entry, feed_url
     return None
 
 
@@ -885,7 +916,7 @@ async def get_desktop_appcast_xml(
 async def download_latest_desktop_release(
     platform: str = Query(default="macos", pattern="^(macos|windows|linux)$"),
     channel: str = Query(default="stable", pattern="^(beta|stable)$"),
-    identity: str = Query(default="stable", pattern="^(stable|beta)$"),
+    identity: Optional[str] = Query(default=None, pattern="^(stable|beta)$"),
 ):
     """
     Serve the latest desktop release installer as an auto-download landing page.
@@ -893,9 +924,20 @@ async def download_latest_desktop_release(
     channel in the legacy release metadata; the requested channel is strict
     (404 when empty — QA/tooling contract).
     Defaults to stable channel (for macos.omi.me). Use channel=beta for QA.
-    identity=beta serves the separately-installable "Omi Beta" DMG, which runs
-    side-by-side with stable.
+    identity selects which installer that channel serves: identity=beta is the
+    separately-installable "Omi Beta" DMG that runs side-by-side with stable.
+    When identity is absent it follows the channel (channel=beta alone serves
+    the beta-identity DMG — the macos.omi.me/beta redirect contract); pass
+    identity explicitly to request the cross product.
     """
+    if identity is None:
+        # macos.omi.me/beta redirects here with only channel=beta — the URL-map redirect
+        # cannot add identity=beta, and defaulting identity to "stable" made the public
+        # beta link serve the stable-identity omi.dmg (production bundle id, production
+        # services) from the beta pointer. A user who asked for a channel implicitly
+        # asked for that channel's identity; explicit identity=stable&channel=beta stays
+        # available for tooling that genuinely wants the cross product.
+        identity = channel
     if identity == "beta":
         channel = "beta"
     desktop_releases = await _get_live_desktop_releases(platform)
@@ -950,6 +992,53 @@ async def download_beta_desktop_release(
     side-by-side Omi Beta identity once a live beta release ships it.
     """
     return await download_latest_desktop_release(platform=platform, channel="beta", identity="beta")
+
+
+@router.get(
+    "/v2/desktop/update-feed/windows",
+    response_model=DesktopWindowsUpdateFeedResponse,
+)
+async def get_windows_desktop_update_feed(
+    response: Response,
+    channel: str = Query(default="stable", pattern="^(beta|stable)$"),
+):
+    """Resolve one immutable, platform-scoped electron-updater feed.
+
+    The GitHub provider's repository-wide ``/releases/latest`` endpoint can
+    select a macOS release in this multi-platform repository. Windows clients
+    use this endpoint first, then point the generic provider at the selected
+    release directory. Stable never falls through to beta. Beta may fall back
+    to stable while the prerelease slot is empty after a promotion.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    desktop_releases = await _get_live_desktop_releases("windows")
+    picked = _pick_windows_update_feed_entry(desktop_releases, channel)
+    served_channel = channel
+    if picked is None and channel == "beta":
+        picked = _pick_windows_update_feed_entry(desktop_releases, "stable")
+        if picked is not None:
+            served_channel = "stable"
+            record_fallback(
+                component="other",
+                from_mode="desktop_windows_update_feed_beta",
+                to_mode="desktop_windows_update_feed_stable",
+                reason="other",
+                outcome="recovered",
+                log=logger,
+            )
+    if picked is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No Windows update feed found for channel: {channel}",
+            headers={"Cache-Control": "no-store"},
+        )
+    entry, feed_url = picked
+    return {
+        "requested_channel": channel,
+        "served_channel": served_channel,
+        "version": entry["version_info"]["version"],
+        "feed_url": feed_url,
+    }
 
 
 @router.get("/v2/desktop/download/windows")
@@ -1146,9 +1235,9 @@ async def register_desktop_release(request: Dict[str, Any], secret_key: str = He
     return {"success": True, "manifest": manifest}
 
 
-@router.post("/v2/desktop/beta/promote-qualified")
-async def promote_qualified_beta(
-    request: QualifiedBetaPromotionRequest,
+@router.post("/v2/desktop/beta/promote-candidate")
+async def promote_beta_candidate(
+    request: BetaCandidatePromotionRequest,
     authorization: str | None = Header(default=None),
 ):
     """Authenticate, independently admit, then atomically advance macOS Beta only."""
@@ -1156,24 +1245,24 @@ async def promote_qualified_beta(
         raise HTTPException(status_code=401, detail="Unauthorized")
     try:
         control = await run_blocking(db_executor, capture_beta_admission, request.tag)
-        manifest = await build_qualified_beta_manifest(request.tag)
+        manifest = await build_signed_beta_manifest(request.tag)
         receipt = await run_blocking(
             db_executor,
             admit_qualified_beta_manifest,
             manifest,
             control_generation=control["control_generation"],
         )
-    except QualifiedBetaAdmissionError:
-        logger.info("qualified_beta_promotion tag=%s result=rejected", request.tag)
-        raise HTTPException(status_code=422, detail="Qualified Beta candidate rejected") from None
+    except BetaCandidateAdmissionError:
+        logger.info("beta_candidate_promotion tag=%s result=rejected", request.tag)
+        raise HTTPException(status_code=422, detail="Beta candidate rejected") from None
     except ValueError:
-        logger.info("qualified_beta_promotion tag=%s result=conflict", request.tag)
-        raise HTTPException(status_code=409, detail="Qualified Beta promotion conflict") from None
+        logger.info("beta_candidate_promotion tag=%s result=conflict", request.tag)
+        raise HTTPException(status_code=409, detail="Beta candidate promotion conflict") from None
     # A prior successful commit can lose its cache deletion. Every committed
     # receipt, including an idempotent retry, repairs only this Beta projection.
     await run_blocking(db_executor, delete_generic_cache, live_cache_key("macos", "beta"))
     logger.info(
-        "qualified_beta_promotion tag=%s result=%s", request.tag, "idempotent" if receipt["idempotent"] else "promoted"
+        "beta_candidate_promotion tag=%s result=%s", request.tag, "idempotent" if receipt["idempotent"] else "promoted"
     )
     return {
         "tag": receipt["manifest"]["release_id"],
@@ -1197,11 +1286,11 @@ async def mutate_broken_beta(
         else:
             if not request.normal_path_unavailable:
                 raise HTTPException(
-                    status_code=422, detail="Why normal qualification cannot recover in time is required"
+                    status_code=422, detail="Why normal Beta promotion cannot recover in time is required"
                 )
             manifest = await build_emergency_beta_manifest(request.target_release_id)
             receipt = await run_blocking(db_executor, emergency_rollout_beta, request.model_dump(), manifest)
-    except QualifiedBetaAdmissionError:
+    except BetaCandidateAdmissionError:
         logger.info("beta_breakglass operation=rollout result=evidence_rejected")
         raise HTTPException(status_code=422, detail="Emergency Beta candidate rejected") from None
     except ValueError as exc:
@@ -1220,7 +1309,7 @@ async def mutate_broken_beta(
 
 @router.post("/v2/desktop/beta/candidates/reserve")
 async def reserve_beta_candidate_endpoint(
-    request: QualifiedBetaPromotionRequest,
+    request: BetaCandidatePromotionRequest,
     authorization: str | None = Header(default=None),
 ):
     """Fence an immutable candidate before GitHub makes it canonical."""

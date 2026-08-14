@@ -59,9 +59,21 @@ enum ChatQueryFailureDisposition: Equatable, Sendable {
         return .failed(.authentication)
       case .agentRuntimeFailure(let failure) where failure.failureCode == .authentication:
         return .failed(.authentication)
+      case .agentRuntimeFailure(let failure) where failure.failureCode == .quotaExceeded:
+        return .failed(.quota)
+      case .agentRuntimeFailure(let failure):
+        switch AgentErrorClassifier.classify(failure).code {
+        case .providerBillingExhausted, .planLimitReached:
+          return .failed(.quota)
+        case .providerAuthExpired, .credentialLeakSuspected:
+          return .failed(.authentication)
+        default:
+          return .failed(.agentRuntime)
+        }
       case .failedToStart:
         return .failed(.bridgeStartFailed)
-      case .nodeNotFound, .bridgeScriptNotFound, .notRunning, .processExited, .restarting:
+      case .nodeNotFound, .bridgeScriptNotFound, .agentRuntimePayloadIncomplete, .notRunning,
+        .processExited, .restarting:
         return .failed(.bridgeUnavailable)
       case .outOfMemory:
         return .failed(.resourceExhausted)
@@ -71,8 +83,6 @@ enum ChatQueryFailureDisposition: Equatable, Sendable {
         return .failed(.concurrentRequest)
       case .quotaExceeded:
         return .failed(.quota)
-      case .agentRuntimeFailure:
-        return .failed(.agentRuntime)
       case .agentError:
         return .failed(.agentError)
       }
@@ -159,6 +169,22 @@ enum ChatTelemetryDimension {
     return base
   }
 
+  /// Closed outcome vocabulary for a terminal tool call. `ToolCallStatus`
+  /// collapses `cancelled`/`interrupted` into `.failed` for UI purposes, but
+  /// telemetry must keep them apart: a user Stop is not a tool defect, and
+  /// merging them would repeat the "stop counted as error" mistake that made
+  /// the legacy `chat_agent_error` corpus unreadable. Anything unrecognized
+  /// reports `unknown` rather than inflating successful completions.
+  static func toolOutcome(_ bridgeStatus: String) -> String {
+    switch bridgeStatus {
+    case "completed": return "completed"
+    case "failed": return "failed"
+    case "cancelled": return "cancelled"
+    case "interrupted": return "interrupted"
+    default: return "unknown"
+    }
+  }
+
   static func screenFailureCode(_ rawValue: String) -> String {
     let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     return allowedScreenFailureCodes.contains(normalized)
@@ -206,6 +232,112 @@ struct ChatQueryCompletionMetrics: Equatable, Sendable {
   }
 }
 
+/// Bounded failure detail attached to `chat_agent_error`. All values are
+/// closed vocabularies (enum raw values / daemon taxonomy codes) — never raw
+/// exception text, per the analytics integrity contract.
+struct ChatQueryErrorDetail: Equatable, Sendable {
+  let errorCode: String
+  let retryable: Bool?
+  let failureCode: String?
+  let failureSource: String?
+  let adapterId: String?
+  let provider: String?
+  let recoveryAction: String?
+  let recoveryOutcome: String?
+  let retryDisposition: String?
+
+  private static func boundedFailureCode(_ code: String) -> String? {
+    switch code {
+    case "adapter_not_registered", "binding_failed", "stale_binding",
+      "adapter_execution_failed", "provider_auth_required", "adapter_process_exited",
+      "adapter_config_invalid", "adapter_process_error":
+      return code
+    default:
+      return nil
+    }
+  }
+
+  static func from(_ error: Error?) -> ChatQueryErrorDetail? {
+    guard let bridgeError = error as? BridgeError else { return nil }
+    switch bridgeError {
+    case .agentError(let message):
+      let classified = AgentErrorClassifier.classify(message)
+      return ChatQueryErrorDetail(
+        errorCode: classified.code.rawValue,
+        retryable: classified.retryable,
+        failureCode: nil,
+        failureSource: nil,
+        adapterId: nil,
+        provider: nil,
+        recoveryAction: nil,
+        recoveryOutcome: nil,
+        retryDisposition: nil)
+    case .agentRuntimePayloadIncomplete:
+      // The missing components are diagnostics for the local log only; PostHog
+      // gets the bounded code.
+      return ChatQueryErrorDetail(
+        errorCode: AgentErrorCode.runtimeInstallIncomplete.rawValue,
+        retryable: false,
+        failureCode: nil,
+        failureSource: nil,
+        adapterId: nil,
+        provider: nil,
+        recoveryAction: nil,
+        recoveryOutcome: nil,
+        retryDisposition: nil)
+    case .agentRuntimeFailure(let failure):
+      let classified = AgentErrorClassifier.classify(failure)
+      let classifierOwnsCode: Bool
+      switch classified.code {
+      case .providerBillingExhausted, .planLimitReached:
+        classifierOwnsCode = true
+      case .providerAuthExpired, .credentialLeakSuspected:
+        classifierOwnsCode = failure.failureCode == .unknown
+      default:
+        classifierOwnsCode = false
+      }
+      return ChatQueryErrorDetail(
+        errorCode: classifierOwnsCode ? classified.code.rawValue : failure.failureCode.rawValue,
+        retryable: classifierOwnsCode ? classified.retryable : failure.retryable,
+        failureCode: boundedFailureCode(failure.code),
+        failureSource: failure.source,
+        adapterId: failure.adapterId,
+        provider: failure.provider,
+        recoveryAction: failure.recoveryAction == "worker_recycled" ? "worker_recycled" : nil,
+        recoveryOutcome: ["recovered", "stop_failed", "binding_stale_failed"].contains(failure.recoveryOutcome ?? "")
+          ? failure.recoveryOutcome : nil,
+        retryDisposition: failure.retryDisposition == "next_send" ? "next_send" : nil)
+    default:
+      return nil
+    }
+  }
+}
+
+func recordAgentRuntimeRecoveryDiagnostics(_ error: Error?) -> ChatQueryErrorDetail? {
+  let detail = ChatQueryErrorDetail.from(error)
+  if let bridgeError = error as? BridgeError,
+    case .agentRuntimeFailure(let failure) = bridgeError,
+    let technicalMessage = failure.technicalMessage
+  {
+    log("ChatProvider: agent runtime technical failure: \(technicalMessage)")
+  }
+  if detail?.recoveryAction == "worker_recycled" {
+    DesktopDiagnosticsManager.shared.recordFallback(
+      area: "agent_runtime",
+      from: "pi_mono_worker",
+      to: "fresh_pi_mono_worker",
+      reason: "local_heal",
+      outcome: detail?.recoveryOutcome == "recovered" ? .degraded : .exhausted,
+      extra: [
+        "recovery_action": "worker_recycled",
+        "retry_disposition": detail?.retryDisposition ?? "unknown",
+        "recovery_outcome": detail?.recoveryOutcome ?? "unknown",
+      ]
+    )
+  }
+  return detail
+}
+
 enum ChatQueryTelemetryEvent: Equatable, Sendable {
   case started(ChatQueryTelemetryContext)
   case completed(ChatQueryTelemetryContext, durationMs: Int, metrics: ChatQueryCompletionMetrics)
@@ -214,6 +346,7 @@ enum ChatQueryTelemetryEvent: Equatable, Sendable {
     durationMs: Int,
     errorClass: ChatQueryErrorClass,
     partialResponse: Bool,
+    detail: ChatQueryErrorDetail?,
     watchdogFired: Bool = false
   )
   case cancelled(
@@ -262,7 +395,7 @@ extension ChatQueryTelemetryEvent {
       if let runtimeAttemptId = metrics.runtimeAttemptId {
         properties["runtime_attempt_id"] = runtimeAttemptId
       }
-    case .failed(let eventContext, let durationMs, let errorClass, let partialResponse, let watchdogFired):
+    case .failed(let eventContext, let durationMs, let errorClass, let partialResponse, let detail, let watchdogFired):
       eventName = "chat_agent_error"
       context = eventContext
       properties = [
@@ -271,6 +404,17 @@ extension ChatQueryTelemetryEvent {
         "partial_response": partialResponse,
         "watchdog_fired": watchdogFired,
       ]
+      if let detail {
+        properties["error_code"] = detail.errorCode
+        if let retryable = detail.retryable { properties["retryable"] = retryable }
+        if let failureCode = detail.failureCode { properties["failure_code"] = failureCode }
+        if let failureSource = detail.failureSource { properties["failure_source"] = failureSource }
+        if let adapterId = detail.adapterId { properties["adapter_id"] = adapterId }
+        if let provider = detail.provider { properties["provider"] = provider }
+        if let recoveryAction = detail.recoveryAction { properties["recovery_action"] = recoveryAction }
+        if let recoveryOutcome = detail.recoveryOutcome { properties["recovery_outcome"] = recoveryOutcome }
+        if let retryDisposition = detail.retryDisposition { properties["retry_disposition"] = retryDisposition }
+      }
     case .cancelled(let eventContext, let durationMs, let reason, let partialResponse):
       eventName = "chat_agent_query_cancelled"
       context = eventContext
@@ -305,7 +449,7 @@ extension ChatQueryTelemetryEvent {
       properties["runtime_surface"] = runtimeSurface
     }
     properties["telemetry_schema_version"] = 2
-    if case .failed(_, _, let errorClass, _, _) = self {
+    if case .failed(_, _, let errorClass, _, _, _) = self {
       // One-release compatibility alias for existing PostHog breakdowns.
       // It is bounded and contains the same value as `error_class`, never the
       // raw exception. Remove after LXEMscAj and Hermes exports migrate to v2.
@@ -460,6 +604,7 @@ final class ChatQueryTelemetryAttempt {
   func fail(
     errorClass: ChatQueryErrorClass,
     partialResponse: Bool = false,
+    detail: ChatQueryErrorDetail? = nil,
     watchdogFired: Bool = false
   ) -> Bool {
     guard beginTerminalEvent() else { return false }
@@ -469,6 +614,7 @@ final class ChatQueryTelemetryAttempt {
         durationMs: durationMs(),
         errorClass: errorClass,
         partialResponse: partialResponse,
+        detail: detail,
         watchdogFired: watchdogFired
       )
     )
@@ -527,6 +673,9 @@ enum ChatVisibleTurnCompletion {
   ) async -> Bool {
     guard lifecycle.complete() else { return false }
     guard telemetryAttempt.complete(metrics: metrics) else { return false }
+    // The answer is on screen and the lifecycle guard above has already refused re-entry, so this
+    // is the one moment per turn at which the turn is visibly done.
+    OmiUISound.play(.complete)
     afterTerminal()
     return await journalCommit()
   }

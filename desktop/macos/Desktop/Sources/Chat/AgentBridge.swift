@@ -1,24 +1,4 @@
-import CryptoKit
 import Foundation
-
-enum AgentContextRevision {
-  static func make(
-    source: AgentContextSource,
-    payload: [String: Any],
-    outcome: AgentContextSourceOutcome
-  ) throws -> String {
-    let material: [String: Any] = [
-      "source": source.rawValue,
-      "outcome": outcome.rawValue,
-      "payload": payload,
-    ]
-    guard JSONSerialization.isValidJSONObject(material) else {
-      throw BridgeError.agentError("Context source payload is not valid JSON")
-    }
-    let data = try JSONSerialization.data(withJSONObject: material, options: [.sortedKeys])
-    return "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-  }
-}
 
 struct AgentExecutionProfile: Equatable, Sendable {
   enum CredentialScope: String, Sendable {
@@ -708,8 +688,8 @@ actor AgentBridge {
 
   let harnessMode: String
 
-  private let clientId = UUID().uuidString
-  private let runtime: AgentRuntimeProcess
+  let clientId = UUID().uuidString
+  let runtime: AgentRuntimeProcess
   private var registered = false
   private var synchronizedRuntimeAuthorityEpoch: UInt64?
   private var synchronizedRuntimeAuthorityOwnerID: String?
@@ -751,7 +731,7 @@ actor AgentBridge {
     return snapshot
   }
 
-  private func resolveAuthorization(
+  func resolveAuthorization(
     _ supplied: RuntimeOwnerAuthorizationSnapshot?,
     expectedOwnerID: String? = nil
   ) throws -> RuntimeOwnerAuthorizationSnapshot {
@@ -810,7 +790,7 @@ actor AgentBridge {
     try await start(authorizationSnapshot: authorizationSnapshot, requiresCredentials: true)
   }
 
-  private func start(
+  func start(
     authorizationSnapshot: RuntimeOwnerAuthorizationSnapshot,
     requiresCredentials: Bool = true
   ) async throws {
@@ -893,14 +873,18 @@ actor AgentBridge {
       generation: generation,
       authorizationSnapshot: authorizationSnapshot)
     let registeredThisCall = !registered || !processWasAlive
-    let requiresManagedCredentials =
-      isPiMonoHarness
-      && AgentRuntimeCredentialPolicy.requiresManagedCredentials(
-        requestedCredentials: requiresCredentials,
-        isNonProduction: AppBuild.isNonProduction,
-        hermeticFaultModelToken: AgentRuntimeCredentialPolicy.hermeticFaultModelToken(
-          isNonProduction: AppBuild.isNonProduction,
-          bundleIdentifier: AppBuild.bundleIdentifier))
+    let hermeticFaultModelToken = AgentRuntimeCredentialPolicy.hermeticFaultModelToken(
+      isNonProduction: AppBuild.isNonProduction,
+      bundleIdentifier: AppBuild.bundleIdentifier)
+    let shouldFetchManagedToken = AgentRuntimeCredentialPolicy.requiresManagedCredentials(
+      requestedCredentials: requiresCredentials,
+      isNonProduction: AppBuild.isNonProduction,
+      hermeticFaultModelToken: hermeticFaultModelToken)
+    let requiresPiMonoCredentials = AgentRuntimeCredentialPolicy.shouldRequirePiMonoCredentials(
+      preferredAdapterIsPiMono: isPiMonoHarness,
+      requestedCredentials: requiresCredentials,
+      isNonProduction: AppBuild.isNonProduction,
+      hermeticFaultModelToken: hermeticFaultModelToken)
     var acquiredRegistration = false
     do {
       if registeredThisCall {
@@ -928,13 +912,14 @@ actor AgentBridge {
       let authorityNeedsSynchronization =
         !status.isSynchronized(
           ownerID: ownerID,
-          requiresCredentials: requiresManagedCredentials)
+          requiresCredentials: requiresPiMonoCredentials)
         || synchronizedRuntimeAuthorityEpoch != status.epoch
         || synchronizedRuntimeAuthorityOwnerID != ownerID
+        || (shouldFetchManagedToken && status.credentialOwnerID != ownerID)
       if authorityNeedsSynchronization {
         await synchronizeRuntimeAuthority(
           authorizationSnapshot: authorizationSnapshot,
-          requiresCredentials: requiresManagedCredentials)
+          requiresCredentials: shouldFetchManagedToken)
         try assertLifecycleFlightCurrent(
           id: flightID,
           generation: generation,
@@ -947,7 +932,7 @@ actor AgentBridge {
         guard
           synchronized.isSynchronized(
             ownerID: ownerID,
-            requiresCredentials: requiresManagedCredentials)
+            requiresCredentials: requiresPiMonoCredentials)
         else {
           throw BridgeError.authMissing
         }
@@ -1013,9 +998,21 @@ actor AgentBridge {
       id: flightID,
       generation: generation,
       authorizationSnapshot: authorizationSnapshot)
+    let hermeticFaultModelToken = AgentRuntimeCredentialPolicy.hermeticFaultModelToken(
+      isNonProduction: AppBuild.isNonProduction,
+      bundleIdentifier: AppBuild.bundleIdentifier)
+    let shouldFetchManagedToken = AgentRuntimeCredentialPolicy.requiresManagedCredentials(
+      requestedCredentials: true,
+      isNonProduction: AppBuild.isNonProduction,
+      hermeticFaultModelToken: hermeticFaultModelToken)
+    let requiresPiMonoCredentials = AgentRuntimeCredentialPolicy.shouldRequirePiMonoCredentials(
+      preferredAdapterIsPiMono: isPiMonoHarness,
+      requestedCredentials: true,
+      isNonProduction: AppBuild.isNonProduction,
+      hermeticFaultModelToken: hermeticFaultModelToken)
     await synchronizeRuntimeAuthority(
       authorizationSnapshot: authorizationSnapshot,
-      requiresCredentials: isPiMonoHarness)
+      requiresCredentials: shouldFetchManagedToken)
     try assertLifecycleFlightCurrent(
       id: flightID,
       generation: generation,
@@ -1029,7 +1026,7 @@ actor AgentBridge {
     guard
       status.isSynchronized(
         ownerID: ownerID,
-        requiresCredentials: isPiMonoHarness)
+        requiresCredentials: requiresPiMonoCredentials)
     else {
       throw BridgeError.authMissing
     }
@@ -1177,10 +1174,8 @@ actor AgentBridge {
   ) async throws -> AgentDefaultExecutionProfile {
     let authorization = try captureAuthorization()
     try await start(authorizationSnapshot: authorization)
-    if adapterId == AgentAdapterId.piMono.rawValue {
-      ensureTokenRefreshTask(authorizationSnapshot: authorization)
-      _ = try? await refreshAuthToken(authorizationSnapshot: authorization)
-    }
+    ensureTokenRefreshTask(authorizationSnapshot: authorization)
+    _ = try? await refreshAuthToken(authorizationSnapshot: authorization)
     guard RuntimeOwnerIdentity.isAuthorizationCurrent(authorization) else {
       throw BridgeError.authMissing
     }
@@ -1190,26 +1185,6 @@ actor AgentBridge {
       modelProfile: modelProfile,
       workingDirectory: workingDirectory,
       expectedPreferenceGeneration: expectedPreferenceGeneration,
-      authorizationSnapshot: authorization
-    )
-  }
-
-  func resolveSurfaceSession(
-    _ surface: AgentSurfaceReference,
-    title: String? = nil,
-    creationProfile: AgentSessionCreationProfile? = nil,
-    authorizationSnapshot: RuntimeOwnerAuthorizationSnapshot? = nil
-  ) async throws -> AgentSurfaceSession {
-    let authorization = try resolveAuthorization(authorizationSnapshot)
-    try await start(authorizationSnapshot: authorization)
-    guard RuntimeOwnerIdentity.isAuthorizationCurrent(authorization) else {
-      throw BridgeError.authMissing
-    }
-    return try await runtime.resolveSurfaceSession(
-      clientId: clientId,
-      surface: surface,
-      title: title,
-      creationProfile: creationProfile,
       authorizationSnapshot: authorization
     )
   }
@@ -1427,6 +1402,25 @@ actor AgentBridge {
       surface: surface,
       ownerID: ownerID,
       terminalization: terminalization,
+      authorizationSnapshot: authorization
+    )
+  }
+
+  func repairJournalTurns(
+    surface: AgentSurfaceReference,
+    ownerID: String,
+    turnIDs: [String],
+    authorizationSnapshot: RuntimeOwnerAuthorizationSnapshot? = nil
+  ) async throws -> [KernelJournalTurn] {
+    let authorization = try resolveAuthorization(
+      authorizationSnapshot,
+      expectedOwnerID: ownerID)
+    try await start(authorizationSnapshot: authorization)
+    return try await runtime.repairJournalTurns(
+      clientId: clientId,
+      surface: surface,
+      ownerID: ownerID,
+      turnIDs: turnIDs,
       authorizationSnapshot: authorization
     )
   }
@@ -1920,9 +1914,9 @@ actor AgentBridge {
   }
 
   /// Node starts with a non-authoritative local placeholder owner. Every
-  /// harness must replace it before the first owner-scoped RPC; pi-mono also
-  /// receives the credential it needs, while local adapters use an owner-only
-  /// handshake and remain independent of managed-cloud token availability.
+  /// harness must replace it before the first owner-scoped RPC. When a managed
+  /// token is available it is pushed even for ACP/Hermes/OpenClaw so a pinned
+  /// pi-mono session can still register; missing token only fails a pi-mono start.
   nonisolated static func synchronizeAuthorityForStart(
     requiresCredentials: Bool,
     refreshCredentials: () async throws -> Bool,
@@ -2075,6 +2069,10 @@ actor AgentBridge {
 enum BridgeError: LocalizedError {
   case nodeNotFound
   case bridgeScriptNotFound
+  /// The bridge script exists but the payload it loads afterwards does not —
+  /// most importantly `pi-mono-extension`, which registers the `omi` provider.
+  /// Carries the missing bundle-relative components for the local log.
+  case agentRuntimePayloadIncomplete(missing: [String])
   case notRunning
   case encodingError
   case timeout
@@ -2097,9 +2095,9 @@ enum BridgeError: LocalizedError {
     case .agentRuntimeFailure(let failure):
       guard failure.source == "runtime" else { return false }
       return failure.userMessage == exactCode || failure.technicalMessage == exactCode
-    case .nodeNotFound, .bridgeScriptNotFound, .notRunning, .encodingError, .timeout,
-      .processExited, .outOfMemory, .failedToStart, .stopped, .restarting, .requestAlreadyActive,
-      .quotaExceeded, .authMissing:
+    case .nodeNotFound, .bridgeScriptNotFound, .agentRuntimePayloadIncomplete, .notRunning,
+      .encodingError, .timeout, .processExited, .outOfMemory, .failedToStart, .stopped, .restarting,
+      .requestAlreadyActive, .quotaExceeded, .authMissing:
       return false
     }
   }
@@ -2116,9 +2114,9 @@ enum BridgeError: LocalizedError {
       }
       return Self.isSessionAuthenticationFailureMessage(failure.displayMessage)
         || (failure.technicalMessage.map(Self.isSessionAuthenticationFailureMessage) ?? false)
-    case .nodeNotFound, .bridgeScriptNotFound, .notRunning, .encodingError, .timeout,
-      .processExited, .outOfMemory, .failedToStart, .stopped, .restarting, .requestAlreadyActive,
-      .quotaExceeded:
+    case .nodeNotFound, .bridgeScriptNotFound, .agentRuntimePayloadIncomplete, .notRunning,
+      .encodingError, .timeout, .processExited, .outOfMemory, .failedToStart, .stopped, .restarting,
+      .requestAlreadyActive, .quotaExceeded:
       return false
     }
   }
@@ -2155,6 +2153,12 @@ enum BridgeError: LocalizedError {
       return AnalyticsManager.isDevBuild
         ? "AI components missing. Run ./run.sh to install the agent runtime."
         : "AI components missing. Please reinstall the app."
+    case .agentRuntimePayloadIncomplete(let missing):
+      // Keep the classifier's own phrase in the string: this description is what
+      // reaches `localizedDescription`, and surfaces re-classify it downstream.
+      let base = Self.runtimeInstallIncompleteMessage
+      guard AnalyticsManager.isDevBuild, !missing.isEmpty else { return base }
+      return "\(base) Missing: \(missing.joined(separator: ", ")). Rebuild with ./run.sh --full."
     case .notRunning:
       return "AI is not running. Try sending your message again."
     case .encodingError:
@@ -2196,21 +2200,15 @@ enum BridgeError: LocalizedError {
     }
   }
 
+  /// Copy for a bundle that shipped without its agent runtime. Retrying cannot
+  /// help — only a repaired install can — so the classifier owns the single
+  /// string and this error reuses it rather than forking a second wording.
+  static let runtimeInstallIncompleteMessage = AgentErrorClassifier.runtimeInstallIncompleteMessage
+
   private static func userFacingAgentErrorMessage(_ msg: String) -> String {
-    guard !msg.isEmpty else { return "Something went wrong. Please try again." }
-    let lower = msg.lowercased()
-    if lower.contains("leaked") || lower.contains("api key") || lower.contains("api_key")
-      || lower.contains("unauthorized") || lower.contains("permission denied")
-      || lower.contains("invalid key") || lower.contains("forbidden")
-    {
-      return "AI service authentication error. Please update the app to the latest version."
-    }
-    if lower.contains("quota") || lower.contains("rate limit") || lower.contains("resource exhausted") {
-      return "AI service is busy. Please try again in a moment."
-    }
-    if lower.contains("overloaded") || lower.contains("service unavailable") || lower.contains("internal error") {
-      return "AI service is temporarily unavailable. Please try again later."
-    }
-    return msg
+    // Classification owns the copy so "please try again" is only ever said for
+    // errors where retrying can help (unretryable causes previously produced
+    // retry storms — e.g. exhausted provider credits).
+    AgentErrorClassifier.classify(msg).userMessage
   }
 }

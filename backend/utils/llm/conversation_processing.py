@@ -21,6 +21,8 @@ from models.conversation_photo import ConversationPhoto
 from models.structured import ActionItem, Event, Structured
 from models.structured_extraction import ActionItemsExtraction, StructuredExtraction
 from .clients import get_llm, get_llm_gateway_chat_structured, parser
+from .discard_parser import DiscardConversation, LenientDiscardParser
+from .gateway_error_contract import is_byok_rate_limit_gateway_error
 from utils.byok import has_byok_keys
 from utils.llm.gateway_client import record_chat_extraction_gateway_result
 from utils.llm.gateway_observability import record_gateway_shadow_comparison
@@ -83,10 +85,6 @@ def _has_gpt56_cacheable_static_prefix(content: str) -> bool:
 # =============================================
 # The implementation moved to conversation_folder.py; that route still uses
 # get_llm('conv_folder') as the production model/provider plug-in seam.
-
-
-class DiscardConversation(BaseModel):
-    discard: bool = Field(description="If the conversation should be discarded or not")
 
 
 class SpeakerIdMatch(BaseModel):
@@ -595,7 +593,7 @@ Content:
 {format_instructions}'''.replace(
         '    ', ''
     ).strip()
-    custom_parser = PydanticOutputParser(pydantic_object=DiscardConversation)
+    custom_parser = LenientDiscardParser(pydantic_object=DiscardConversation)
     prompt_values = {
         'full_context': full_context,
         'duration_context': duration_context,
@@ -895,6 +893,7 @@ def extract_action_items(
     • Keep each action item SHORT and concise (maximum 15 words, strict limit)
     • Use clear, direct language
     • Start with a verb when possible (e.g., "Call", "Send", "Review", "Pay", "Open", "Submit", "Finish", "Complete")
+    • When transcript lines begin with [segment:ID start-end], include the smallest sufficient set of exact supporting IDs in source_segment_ids; never invent an ID, and leave it empty when the content has no segment markers.
     • Include only essential details
 
     • CRITICAL - Resolve ALL vague references:
@@ -1046,6 +1045,11 @@ def extract_action_items(
         return action_items
 
     except Exception as e:
+        # BYOK rate-limit failures are actionable and must reach the composition
+        # boundary (process_conversation._get_structured) so the user gets the
+        # typed 429/retry contract instead of a silently incomplete conversation.
+        if is_byok_rate_limit_gateway_error(e):
+            raise
         logger.error(f'Error extracting action items: {e}')
         return []
 
@@ -1187,7 +1191,6 @@ def get_reprocess_transcript_structure(
     started_at: datetime,
     language_code: str,
     tz: str,
-    title: str,
     photos: Optional[List[ConversationPhoto]] = None,
     output_language_code: Optional[str] = None,
 ) -> Structured:
@@ -1209,7 +1212,7 @@ def get_reprocess_transcript_structure(
     prompt_text = '''You are an expert content analyzer. Your task is to analyze the provided content (which could be a transcript, a series of photo descriptions from a wearable camera, or both) and provide structure and clarity.
     The content language is {language_code}. You MUST respond entirely in {response_language}.
 
-    For the title, use ```{title}```, if it is empty, use the main topic of the content.
+    For the title, generate a concise title from the current content. Do not reuse a previous title.
     For the overview, condense the content into a summary with the main topics discussed or scenes observed, making sure to capture the key points and important details.
     For the emoji, select a single emoji that vividly reflects the core subject, mood, or outcome of the content. Strive for an emoji that is specific and evocative, rather than generic (e.g., prefer 🎉 for a celebration over 👍 for general agreement, or 💡 for a new idea over 🧠 for general thought).
 
@@ -1257,7 +1260,6 @@ def get_reprocess_transcript_structure(
         chain.invoke(
             {
                 'full_context': full_context,
-                'title': title,
                 'format_instructions': parser.get_format_instructions(),
                 'language_code': language_code,
                 'response_language': response_language,

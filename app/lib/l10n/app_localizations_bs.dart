@@ -746,11 +746,6 @@ class AppLocalizationsBs extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Vaš plan se obnavlja na $date.';
-  }
-
-  @override
   String get basicPlan => 'Besplatni plan';
 
   @override
@@ -1467,7 +1462,7 @@ class AppLocalizationsBs extends AppLocalizations {
   String get payYourSttProvider => 'Slobodno koristi omi. Plaćate samo vašem STT dobavljaču direktno.';
 
   @override
-  String get freeMinutesMonth => '1.200 besplatnih minuta/mesec uključeno. Neograničeno sa ';
+  String get freeMinutesMonth => '300 besplatnih minuta/mesec uključeno. Neograničeno sa ';
 
   @override
   String get omiUnlimited => 'Omi Unlimited';
@@ -2128,16 +2123,16 @@ class AppLocalizationsBs extends AppLocalizations {
   String get editMemory => '✏️ Izmeni uspomenu';
 
   @override
-  String get pinAsBaseline => 'Pin as Baseline';
+  String get pinAsBaseline => 'Prikači kao osnovu';
 
   @override
-  String get unpinAsBaseline => 'Unpin from Baseline';
+  String get unpinAsBaseline => 'Otkači s osnove';
 
   @override
-  String get baselineMemory => 'Baseline Memory';
+  String get baselineMemory => 'Osnovna memorija';
 
   @override
-  String get alwaysInContext => 'Always in context';
+  String get alwaysInContext => 'Uvijek u kontekstu';
 
   @override
   String get memoryContentHint => 'Volim da jedem sladoled...';
@@ -4717,7 +4712,7 @@ class AppLocalizationsBs extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Nema specifičnog pristupa podacima konfiguriranog.';
 
   @override
-  String get basicPlanDescription => '1.200 premium minuta + neograničeno na uređaju';
+  String get basicPlanDescription => '300 premium minuta + neograničeno na uređaju';
 
   @override
   String get minutes => 'minute';
@@ -6011,7 +6006,7 @@ class AppLocalizationsBs extends AppLocalizations {
 
   @override
   String get premiumMinutesInfo =>
-      '1.200 premium minuta/mjesec. Kartaca na uređaju nudi neограничenu besplatnu transkripciju.';
+      '300 premium minuta/mjesec. Kartaca na uređaju nudi neограничenu besplatnu transkripciju.';
 
   @override
   String get viewUsage => 'Prikaži upotrebu';
@@ -6093,7 +6088,7 @@ class AppLocalizationsBs extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1.200 premium minuta/mjesec. Kartaca na uređaju nudi neograničenu besplatnu transkripciju. ';
+      '300 premium minuta/mjesec. Kartaca na uređaju nudi neograničenu besplatnu transkripciju. ';
 
   @override
   String get audioProcessedLocally =>
@@ -9798,4 +9793,79 @@ class AppLocalizationsBs extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Povezivanje s tim mikrofonom nije uspjelo. Provjerite je li povezan u postavkama iPhonea.';
+
+  @override
+  String get syncStatusTooOld => 'Prestaro za sinkronizaciju — Omi ga ne može prihvatiti';
+
+  @override
+  String get planSheetChooseYourPlan => 'Odaberite svoj plan da otključate neograničeni Omi.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Dostupno na Macu, mobitelu i webu';
+
+  @override
+  String get popularBadge => 'POPULARNO';
+
+  @override
+  String get worksOnDesktop => 'Radi na desktopu';
+
+  @override
+  String get noDesktopAccess => 'Ne radi na desktopu';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months mjeseci / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count mjeseci besplatno',
+      few: '$count mjeseca besplatno',
+      one: '$count mjesec besplatno',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi je besplatan, ali besplatna verzija ima ograničenja koja utiču na vaše iskustvo:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'Kašnjenje od 5-7 sekundi (nije u stvarnom vremenu)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Pređite na besplatnu verziju';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Ostvarite besplatan neograničen pristup';
+
+  @override
+  String get shareDataForTraining => 'Dijelite podatke za treniranje';
+
+  @override
+  String get yourRequestUnderReview => 'Vaš zahtjev je na pregledu';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Je vyžadována aktualizace';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Nainstalujte nejnovější aplikaci Omi, abyste mohli pokračovat po migraci účtu.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Probíhá migrace';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Váš účet se migrací. Produktové funkce jsou pozastaveny až do dokončení migrace.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Váš účet je po vrácení migrace v režimu údržby. Novější data mohou být izolována.';
+
+  @override
+  String get accountCutoverOpenStore => 'Otevřít obchod';
 }

@@ -966,16 +966,6 @@
             }
         }
     },
-    "renewsOn": "Vaš plan se obnavlja na {date}.",
-    "@renewsOn": {
-        "description": "Renewal message",
-        "placeholders": {
-            "date": {
-                "type": "String",
-                "example": "Jan 1, 2026"
-            }
-        }
-    },
     "basicPlan": "Besplatni plan",
     "@basicPlan": {
         "description": "Basic plan name"
@@ -1483,7 +1473,7 @@
     "exportConfiguration": "Izvezi konfiguraciju",
     "bringYourOwn": "Dovedite svoje",
     "payYourSttProvider": "Slobodno koristi omi. Plaćate samo vašem STT dobavljaču direktno.",
-    "freeMinutesMonth": "1.200 besplatnih minuta/mesec uključeno. Neograničeno sa ",
+    "freeMinutesMonth": "300 besplatnih minuta/mesec uključeno. Neograničeno sa ",
     "omiUnlimited": "Omi Unlimited",
     "hostRequired": "Domaćin je obavezan",
     "validPortRequired": "Validan port je obavezan",
@@ -5490,7 +5480,7 @@
     "@noSpecificDataAccessConfigured": {
         "description": "Message shown when app has no specific data access"
     },
-    "basicPlanDescription": "1.200 premium minuta + neograničeno na uređaju",
+    "basicPlanDescription": "300 premium minuta + neograničeno na uređaju",
     "@basicPlanDescription": {
         "description": "Description of basic plan features in usage page"
     },
@@ -7265,7 +7255,7 @@
     "@cloudProvider": {
         "description": "Tab label for cloud provider option"
     },
-    "premiumMinutesInfo": "1.200 premium minuta/mjesec. Kartaca na uređaju nudi neограничenu besplatnu transkripciju.",
+    "premiumMinutesInfo": "300 premium minuta/mjesec. Kartaca na uređaju nudi neограничenu besplatnu transkripciju.",
     "@premiumMinutesInfo": {
         "description": "Info about premium minutes"
     },
@@ -7376,7 +7366,7 @@
     "@batteryDrainSignificantly": {
         "description": "Warning about battery drain"
     },
-    "premiumMinutesMonth": "1.200 premium minuta/mjesec. Kartaca na uređaju nudi neograničenu besplatnu transkripciju. ",
+    "premiumMinutesMonth": "300 premium minuta/mjesec. Kartaca na uređaju nudi neograničenu besplatnu transkripciju. ",
     "@premiumMinutesMonth": {
         "description": "Description of premium minutes quota"
     },
@@ -10567,6 +10557,7 @@
     "syncStatusWaiting": "Čeka sinkronizaciju",
     "syncStatusRetrying": "Obrada nije uspjela — ponovni pokušaj",
     "syncStatusFailed": "Neuspjelo — dodirnite Ponovi",
+    "syncStatusTooOld": "Prestaro za sinkronizaciju — Omi ga ne može prihvatiti",
     "syncStatusFileUnavailable": "Datoteka nije dostupna",
     "syncStatusUploaded": "Otpremljeno · obrada na Omi",
     "noRecordingsYet": "Još nema snimaka",
@@ -10766,5 +10757,28 @@
     "whisperModelSizeLarge": "Veliki",
     "whisperModelSizeMedium": "Srednji",
     "whisperModelSizeSmall": "Mali",
-    "whisperModelSizeTiny": "Sićušni"
+    "whisperModelSizeTiny": "Sićušni",
+    "planSheetChooseYourPlan": "Odaberite svoj plan da otključate neograničeni Omi.",
+    "availableOnMacMobileWeb": "Dostupno na Macu, mobitelu i webu",
+    "popularBadge": "POPULARNO",
+    "worksOnDesktop": "Radi na desktopu",
+    "noDesktopAccess": "Ne radi na desktopu",
+    "annualBillingSummary": "{months} mjeseci / {price}",
+    "monthsFreeBadge": "{count, plural, one{{count} mjesec besplatno} few{{count} mjeseca besplatno} other{{count} mjeseci besplatno}}",
+    "freemiumLimitsIntro": "Omi je besplatan, ali besplatna verzija ima ograničenja koja utiču na vaše iskustvo:",
+    "downgradeLimitDelayNotRealTime": "Kašnjenje od 5-7 sekundi (nije u stvarnom vremenu)",
+    "downgradeToFreemiumAction": "Pređite na besplatnu verziju",
+    "getFreeUnlimitedAccess": "Ostvarite besplatan neograničen pristup",
+    "shareDataForTraining": "Dijelite podatke za treniranje",
+    "yourRequestUnderReview": "Vaš zahtjev je na pregledu",
+    "pinAsBaseline": "Prikači kao osnovu",
+    "unpinAsBaseline": "Otkači s osnove",
+    "baselineMemory": "Osnovna memorija",
+    "alwaysInContext": "Uvijek u kontekstu",
+    "accountCutoverUpdateRequiredTitle": "Je vyžadována aktualizace",
+    "accountCutoverUpdateRequiredMessage": "Nainstalujte nejnovější aplikaci Omi, abyste mohli pokračovat po migraci účtu.",
+    "accountCutoverMigrationInProgressTitle": "Probíhá migrace",
+    "accountCutoverMigrationInProgressMessage": "Váš účet se migrací. Produktové funkce jsou pozastaveny až do dokončení migrace.",
+    "accountCutoverMigrationRollbackMessage": "Váš účet je po vrácení migrace v režimu údržby. Novější data mohou být izolována.",
+    "accountCutoverOpenStore": "Otevřít obchod"
 }

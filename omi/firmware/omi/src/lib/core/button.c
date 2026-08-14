@@ -433,6 +433,24 @@ void turnoff_all()
     // Log system power off
     LOG_INF("System powering off");
 
+    // Configure usr_btn as input with interrupt to allow wake-up
+    rc = gpio_pin_configure_dt(&usr_btn, GPIO_INPUT);
+    if (rc < 0) {
+        LOG_ERR("Could not configure usr_btn GPIO (%d)", rc);
+        return;
+    }
+
+    rc = gpio_pin_interrupt_configure_dt(&usr_btn, GPIO_INT_LEVEL_LOW);
+    if (rc < 0) {
+        LOG_ERR("Could not configure usr_btn GPIO interrupt (%d)", rc);
+        return;
+    }
+    rc = watchdog_deinit();
+    if (rc < 0) {
+        LOG_ERR("Failed to deinitialize watchdog (%d)", rc);
+        return;
+    }
+
     /* Persist an IMU timestamp base so we can estimate time across system_off. */
     lsm6dsl_time_prepare_for_system_off();
     k_msleep(1000);

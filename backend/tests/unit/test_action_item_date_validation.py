@@ -295,6 +295,10 @@ conv_folder_stub.FolderAssignment = MagicMock()
 conv_folder_stub.assign_conversation_to_folder = MagicMock()
 conv_folder_stub.build_folders_context = MagicMock(return_value="")
 
+# Stub utils.llm.gateway_error_contract (conversation_processing imports from it)
+gateway_error_contract_stub = _stub_module("utils.llm.gateway_error_contract")
+gateway_error_contract_stub.is_byok_rate_limit_gateway_error = MagicMock(return_value=False)
+
 # Load models first
 _stub_package("models")
 sys.modules["models"].__path__ = [str(BACKEND_DIR / "models")]
@@ -308,6 +312,9 @@ action_item_tools = _load_module_from_file(
 )
 create_action_item_tool = action_item_tools.create_action_item_tool
 update_action_item_tool = action_item_tools.update_action_item_tool
+
+# discard_parser only needs pydantic and langchain_core, so load the real module.
+_load_module_from_file("utils.llm.discard_parser", BACKEND_DIR / "utils" / "llm" / "discard_parser.py")
 
 conversation_processing = _load_module_from_file(
     "utils.llm.conversation_processing",

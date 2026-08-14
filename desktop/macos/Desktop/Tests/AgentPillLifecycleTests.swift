@@ -321,8 +321,8 @@ import XCTest
     XCTAssertTrue(typingSource.contains("struct TypingIndicator: View"))
     XCTAssertTrue(typingSource.contains("OmiThinkingMark()"))
     XCTAssertTrue(typingSource.contains(".linear(duration: 0.9).repeatForever(autoreverses: false)"))
-    XCTAssertTrue(notchSource.contains("private struct NotchThinkingMark: View"))
-    XCTAssertTrue(notchSource.contains("OmiThinkingMark()"))
+    XCTAssertTrue(notchSource.contains("NotchVoiceMorphMark("))
+    XCTAssertTrue(notchSource.contains("isThinking: showingNotchThinking"))
     XCTAssertFalse(notchSource.contains("Text(\"Thinking\")"))
     XCTAssertFalse(typingSource.contains("animationPhase"))
     XCTAssertFalse(typingSource.contains("scaleEffect(animationPhase"))
@@ -374,8 +374,9 @@ import XCTest
     XCTAssertFalse(windowSource.contains("resolveDelegationAndDispatch"))
     XCTAssertTrue(windowSource.contains("await dispatchChatQuery("))
     XCTAssertFalse(source.contains("AgentPillFollowUpRoutingPolicy"))
-    // The bar's typed follow-up composer was retired (#10181): its "Continue
-    // in Omi" affordance routes to the main chat instead of spawning.
+    // The bar's typed follow-up composer was retired: its Continue in Omi
+    // affordance routes to the main chat instead of spawning.
+    XCTAssertTrue(source.contains("Continue in Omi"))
     XCTAssertTrue(source.contains("openMainAppChat()"))
   }
 
@@ -430,7 +431,7 @@ import XCTest
         "let targetSize = self.currentSurfaceSizeForCurrentScreen(frameIncludesVoiceGlow: wasActive)"))
   }
 
-  func testNotchPTTUsesCompactWaveformOnly() throws {
+  func testNotchPTTUsesTheAlwaysMountedVoiceMorphMark() throws {
     let source = try floatingControlBarViewSource()
 
     guard let lobeRange = source.range(of: "private var notchAgentLobe: some View"),
@@ -440,7 +441,9 @@ import XCTest
     }
     let lobeSource = String(source[lobeRange.lowerBound..<controlRange.lowerBound])
 
-    XCTAssertTrue(lobeSource.contains("VoiceWaveformBars(isActive: true)"))
+    XCTAssertTrue(lobeSource.contains("NotchAgentPillsRowView("))
+    XCTAssertTrue(lobeSource.contains("isVoiceListening: showingNotchWaveform"))
+    XCTAssertFalse(lobeSource.contains("VoiceWaveformBars(isActive: true)"))
     XCTAssertFalse(lobeSource.contains("showingNotchPttHint"))
     XCTAssertTrue(source.contains("pttStatusBanner"))
     XCTAssertTrue(source.contains("state.isVoiceListening && state.pttHintText.isEmpty"))
@@ -451,8 +454,10 @@ import XCTest
     let view = try floatingControlBarViewSource()
     let response = try aiResponseViewSource()
     let waveformSites = view.components(separatedBy: "VoiceWaveformBars(").count - 1
-    // Chrome morph lobe + optional idle pill voiceListeningView.
-    XCTAssertEqual(waveformSites, 2)
+    // The always-mounted notch mark owns its waveform morph. The remaining
+    // bars belong only to the optional non-notch voiceListeningView.
+    XCTAssertEqual(waveformSites, 1)
+    XCTAssertTrue(view.contains("NotchVoiceMorphMark("))
     XCTAssertTrue(view.contains("private var notchAgentLobe: some View"))
     XCTAssertTrue(view.contains("private var voiceListeningView: some View"))
     XCTAssertTrue(
@@ -485,10 +490,21 @@ import XCTest
       ))
     XCTAssertTrue(source.contains("private func openMainChatFromIdleNotch()"))
     XCTAssertTrue(source.contains("NotchIdleTapRoute.perform("))
-    XCTAssertTrue(source.contains("(NSApp.delegate as? AppDelegate)?.openMainAppChat()"))
+    XCTAssertTrue(source.contains("AppDelegate.summonWindowTarget()?.openMainAppChat()"))
+    XCTAssertFalse(source.contains("(NSApp.delegate as? AppDelegate)?.openMainAppChat()"))
     XCTAssertFalse(source.contains("gearshape.fill"))
     XCTAssertFalse(source.contains("openFloatingBarSettings()"))
     XCTAssertTrue(source.contains("openAgentChatsFromNotchLogo()"))
+  }
+
+  func testChatFirstCanRoutePrimaryFloatingTextEntryToTheMainApp() {
+    FloatingPrimaryTextInputRouting.configure(routesToMainApp: false)
+    defer { FloatingPrimaryTextInputRouting.configure(routesToMainApp: false) }
+
+    XCTAssertFalse(FloatingPrimaryTextInputRouting.shouldRouteAgentExitToMainApp(hasMainConversation: false))
+    FloatingPrimaryTextInputRouting.configure(routesToMainApp: true)
+    XCTAssertTrue(FloatingPrimaryTextInputRouting.shouldRouteAgentExitToMainApp(hasMainConversation: false))
+    XCTAssertFalse(FloatingPrimaryTextInputRouting.shouldRouteAgentExitToMainApp(hasMainConversation: true))
   }
 
   func testNotchChatSizingPreservesSurfaceWidthAndGlowList() throws {
@@ -529,7 +545,7 @@ import XCTest
     XCTAssertTrue(scrollSource.contains("struct ChatScrollContainer<Content: View>: View"))
     XCTAssertTrue(scrollSource.contains("UserScrollDetector {"))
     XCTAssertTrue(scrollSource.contains("onScrollSettledAtBottom"))
-    XCTAssertTrue(scrollSource.contains("scheduleSettledBottomChecks"))
+    XCTAssertTrue(scrollSource.contains("scheduleSettledBottomFollow"))
     XCTAssertTrue(scrollSource.contains("Self.isAtBottom(scrollView)"))
     XCTAssertTrue(scrollSource.contains("scrollMode = .freeScrolling"))
     XCTAssertTrue(scrollSource.contains("if scrollMode == .followingBottom"))
@@ -547,10 +563,10 @@ import XCTest
     XCTAssertTrue(windowSource.contains("state.isNotchHoverMenuVisible ? .openMenuRetention : .activationOnly"))
     XCTAssertTrue(source.contains("isChatChromePinned || shouldShowNotchHoverMenu"))
     XCTAssertTrue(source.contains("static let maxAgents = FloatingControlBarWindow.notchAgentListMaxVisibleAgents"))
-    XCTAssertTrue(source.contains("static let dotDiameterRatio: CGFloat = 0.18"))
-    XCTAssertTrue(source.contains("static let ringRadiusRatio: CGFloat = 0.33"))
-    XCTAssertTrue(source.contains("NotchAgentOmiIndicatorView(pills: stackedPills)"))
-    XCTAssertTrue(source.contains("NotchOmiMark(dotColors: visiblePills.map"))
+    XCTAssertTrue(source.contains("NotchVoiceMorphMark("))
+    XCTAssertTrue(source.contains("isListening: isVoiceListening"))
+    XCTAssertTrue(source.contains("isThinking: isThinking"))
+    XCTAssertTrue(source.contains("dotColors: stackedPills.prefix"))
     XCTAssertTrue(source.contains("NotchAgentMorphField("))
     XCTAssertTrue(source.contains("NotchAgentListRow("))
     XCTAssertTrue(source.contains("title: pill.title"))
@@ -611,7 +627,7 @@ import XCTest
     XCTAssertTrue(source.contains("@State private var notchLogoHovering = false"))
     XCTAssertTrue(source.contains("private func setNotchLogoHovering(_ hovering: Bool)"))
     XCTAssertTrue(source.contains("private var notchAgentLogoHitTarget: some View"))
-    XCTAssertTrue(source.contains("The Omi mark always belongs to the compact notch header."))
+    XCTAssertTrue(source.contains("One always-mounted identity mark owns idle, PTT, and thinking"))
     XCTAssertTrue(source.contains("ZStack(alignment: .trailing)"))
     XCTAssertTrue(source.contains("static let logoFrameSize: CGFloat = 21"))
     XCTAssertTrue(source.contains(".frame(width: 44, height: 44)"))
@@ -744,14 +760,169 @@ import XCTest
     XCTAssertEqual(window.frame, expectedFrame)
   }
 
+  func testIdleNotchWindowDoesNotCoverTheInvisibleHoverMenuExtent() {
+    let previousForceNoNotch = getenv("OMI_FORCE_NO_NOTCH").map { String(cString: $0) }
+    let previousForceNotch = getenv("OMI_FORCE_NOTCH").map { String(cString: $0) }
+    unsetenv("OMI_FORCE_NO_NOTCH")
+    setenv("OMI_FORCE_NOTCH", "1", 1)
+    defer {
+      if let previousForceNoNotch {
+        setenv("OMI_FORCE_NO_NOTCH", previousForceNoNotch, 1)
+      } else {
+        unsetenv("OMI_FORCE_NO_NOTCH")
+      }
+      if let previousForceNotch {
+        setenv("OMI_FORCE_NOTCH", previousForceNotch, 1)
+      } else {
+        unsetenv("OMI_FORCE_NOTCH")
+      }
+    }
+
+    let window = FloatingControlBarWindow(
+      contentRect: .zero,
+      styleMask: [.borderless],
+      backing: .buffered,
+      defer: false
+    )
+    defer { window.close() }
+
+    window.makeKeyAndOrderFront(nil)
+    window.state.setNotchHoverMenuOpen(false)
+    window.normalizeForTemporaryShow()
+
+    let chromeHeight = FloatingControlBarWindow.notchChromeHeight(for: window.screen)
+    let idleFrameHeight = chromeHeight + FloatingControlBarWindow.notchGlowOutsetBottom
+    let formerMaximumHeight =
+      chromeHeight
+      + FloatingControlBarWindow.notchHoverMenuHeight(
+        agentCount: FloatingControlBarWindow.notchAgentListMaxVisibleAgents)
+      + FloatingControlBarWindow.notchGlowOutsetBottom
+    XCTAssertEqual(window.frame.height, idleFrameHeight, accuracy: 0.5)
+    XCTAssertLessThan(window.frame.height, formerMaximumHeight)
+
+    let pointInsideFormerDeadZone = NSPoint(
+      x: window.frame.midX,
+      y: window.frame.maxY - idleFrameHeight - 20
+    )
+    XCTAssertFalse(window.frame.contains(pointInsideFormerDeadZone))
+  }
+
+  func testPresentingDuringNotchRetractionKeepsThePanelVisibleAndRestoresItsContent() {
+    let previousForceNoNotch = getenv("OMI_FORCE_NO_NOTCH").map { String(cString: $0) }
+    let previousForceNotch = getenv("OMI_FORCE_NOTCH").map { String(cString: $0) }
+    let previousDraggableBarEnabled = ShortcutSettings.shared.draggableBarEnabled
+    ShortcutSettings.shared.draggableBarEnabled = false
+    unsetenv("OMI_FORCE_NO_NOTCH")
+    setenv("OMI_FORCE_NOTCH", "1", 1)
+    defer {
+      ShortcutSettings.shared.draggableBarEnabled = previousDraggableBarEnabled
+      if let previousForceNoNotch {
+        setenv("OMI_FORCE_NO_NOTCH", previousForceNoNotch, 1)
+      } else {
+        unsetenv("OMI_FORCE_NO_NOTCH")
+      }
+      if let previousForceNotch {
+        setenv("OMI_FORCE_NOTCH", previousForceNotch, 1)
+      } else {
+        unsetenv("OMI_FORCE_NOTCH")
+      }
+    }
+
+    let window = FloatingControlBarWindow(
+      contentRect: .zero,
+      styleMask: [.borderless],
+      backing: .buffered,
+      defer: false
+    )
+    defer { window.close() }
+    let scheduler = UncancellableRetractionScheduler()
+    window.notchRetractionScheduler = scheduler
+    var staleRetractionCompletionCount = 0
+
+    window.beginNotchRetraction { staleRetractionCompletionCount += 1 }
+    window.showNotification(
+      FloatingBarNotification(
+        ownerID: "owner",
+        title: "Replacement notification",
+        message: "Must remain visible",
+        assistantId: "test"),
+      animated: false)
+    scheduler.fire()
+
+    XCTAssertEqual(
+      staleRetractionCompletionCount, 0,
+      "replacement content must invalidate the stale retraction completion")
+    XCTAssertEqual(window.state.currentNotification?.title, "Replacement notification")
+    XCTAssertEqual(window.state.notchRevealProgress, 1, accuracy: 0.001)
+  }
+
+  func testStartingPushToTalkDuringNotchRetractionKeepsThePanelVisible() {
+    let previousForceNoNotch = getenv("OMI_FORCE_NO_NOTCH").map { String(cString: $0) }
+    let previousForceNotch = getenv("OMI_FORCE_NOTCH").map { String(cString: $0) }
+    let previousDraggableBarEnabled = ShortcutSettings.shared.draggableBarEnabled
+    ShortcutSettings.shared.draggableBarEnabled = false
+    unsetenv("OMI_FORCE_NO_NOTCH")
+    setenv("OMI_FORCE_NOTCH", "1", 1)
+    defer {
+      ShortcutSettings.shared.draggableBarEnabled = previousDraggableBarEnabled
+      if let previousForceNoNotch {
+        setenv("OMI_FORCE_NO_NOTCH", previousForceNoNotch, 1)
+      } else {
+        unsetenv("OMI_FORCE_NO_NOTCH")
+      }
+      if let previousForceNotch {
+        setenv("OMI_FORCE_NOTCH", previousForceNotch, 1)
+      } else {
+        unsetenv("OMI_FORCE_NOTCH")
+      }
+    }
+
+    let window = FloatingControlBarWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 360, height: 58),
+      styleMask: [.borderless, .nonactivatingPanel],
+      backing: .buffered,
+      defer: false
+    )
+    defer { window.close() }
+    let scheduler = UncancellableRetractionScheduler()
+    window.notchRetractionScheduler = scheduler
+    var staleRetractionCompletionCount = 0
+
+    window.beginNotchRetraction { staleRetractionCompletionCount += 1 }
+    window.resizeForPTTState(expanded: true)
+    scheduler.fire()
+
+    XCTAssertEqual(
+      staleRetractionCompletionCount, 0,
+      "active push-to-talk must invalidate the stale retraction completion")
+    XCTAssertEqual(window.state.notchRevealProgress, 1, accuracy: 0.001)
+  }
+
+  func testDisabledBarDoesNotOrderOutAReplacementConversationAfterCloseSettles() {
+    let manager = FloatingControlBarManager.shared
+    let previousEnabled = manager.isEnabled
+    manager.isEnabled = false
+    defer { manager.isEnabled = previousEnabled }
+    let window = FloatingControlBarWindow(
+      contentRect: .zero,
+      styleMask: [.borderless],
+      backing: .buffered,
+      defer: false
+    )
+    defer { window.close() }
+
+    window.state.showingAIConversation = true
+    XCTAssertFalse(window.shouldOrderOutAfterConversationClose)
+    window.state.showingAIConversation = false
+    XCTAssertTrue(window.shouldOrderOutAfterConversationClose)
+  }
+
   func testAgentSwitcherResizeMatchesContentMorphDurations() throws {
     let windowSource = try floatingControlBarWindowSource()
+    let viewSource = try floatingControlBarViewSource()
 
-    // Pill mode still resizes its panel, and that resize must animate with the
-    // same durations as its content, or the panel keeps sliding after the rows
-    // settle. Notch mode is fixed-window: the switcher open/close must never
-    // animate the NSPanel frame — it only re-asserts the constant idle/hover
-    // surface frame and lets the SwiftUI content morph carry the transition.
+    // SwiftUI owns the content morph. The notch panel snaps once instead of
+    // animating its frame per tick or reserving the maximum hover extent.
     XCTAssertTrue(windowSource.contains("static let notchHoverMenuExpandDuration: TimeInterval = 0.16"))
     XCTAssertTrue(windowSource.contains("static let notchHoverMenuCollapseDuration: TimeInterval = 0.10"))
     XCTAssertTrue(
@@ -768,14 +939,20 @@ import XCTest
     }
     let body = String(windowSource[start.lowerBound..<end.lowerBound])
 
-    // Notch: fixed frame only, before any pill-mode resize.
+    // Notch: one non-animated boundary resize; pill mode keeps its existing
+    // semantic animated transition.
     XCTAssertTrue(body.contains("if notchModeEnabled {"))
-    XCTAssertTrue(body.contains("assertNotchFixedHoverSurfaceFrame()"))
+    XCTAssertTrue(body.contains("notchHoverMenuSurfaceSize(agentCount:"))
+    XCTAssertTrue(body.contains(": notchCollapsedSize"))
+    XCTAssertTrue(body.contains("animated: false"))
     XCTAssertTrue(body.contains("animationDuration: Self.notchHoverMenuExpandDuration"))
     XCTAssertTrue(body.contains("animationDuration: Self.notchHoverMenuCollapseDuration"))
     XCTAssertTrue(body.contains("resizeSurfaceTransition("))
     XCTAssertTrue(body.contains(".agentSwitcher(visible: true)"))
     XCTAssertTrue(body.contains(".agentSwitcher(visible: false)"))
+    XCTAssertTrue(viewSource.contains("completionCriteria: .logicallyComplete"))
+    XCTAssertTrue(viewSource.contains("settleNotchAgentSwitcherCollapse()"))
+    XCTAssertTrue(viewSource.contains("resizeForHover(expanded: false)"))
     XCTAssertFalse(body.contains("resizeAnchored("))
     // No bare animated resize (which defaults to the slow 0.3s) may remain in
     // the hover-menu expand/collapse path.
@@ -806,9 +983,10 @@ import XCTest
     let viewSource = try floatingControlBarViewSource()
 
     XCTAssertFalse(viewSource.contains("AgentPillFollowUpRoutingPolicy"))
-    // Typed steering from the pill was retired (#10181): the composer's only
-    // affordance opens the main chat, so no second send path can exist.
+    // Typed steering from the pill was retired: the composer's only affordance
+    // opens the main chat, so no second send path can exist.
     XCTAssertFalse(viewSource.contains("manager.continueAgent(from:"))
+    XCTAssertTrue(viewSource.contains("Continue in Omi"))
     XCTAssertTrue(viewSource.contains("openMainAppChat()"))
   }
 
@@ -834,8 +1012,8 @@ import XCTest
     XCTAssertTrue(chatBubbleSource.contains("var onOpenAgent: ((UUID, @escaping (Bool) -> Void) -> Void)? = nil"))
     XCTAssertTrue(
       chatBubbleSource.contains("var onOpenAgentRef: ((AgentTimelineRef, @escaping (Bool) -> Void) -> Void)? = nil"))
-    XCTAssertTrue(chatBubbleSource.contains("calls.compactMap(\\.agentOpenRef).last"))
-    XCTAssertTrue(chatBubbleSource.contains("agentOpenRef: block.agentOpenRef"))
+    XCTAssertTrue(chatBubbleSource.contains("ForEach(timelineItems) { item in"))
+    XCTAssertTrue(chatBubbleSource.contains("agentOpenRef: item.block.agentOpenRef"))
     XCTAssertTrue(chatBubbleSource.contains("Self.cleanToolName(name) == \"spawn_agent\""))
     XCTAssertTrue(chatBubbleSource.contains("Self.labeledValue(in: output, keys: [\"id\"])"))
     XCTAssertTrue(chatBubbleSource.contains("keys: [\"sessionid\", \"session_id\"]"))
@@ -894,8 +1072,8 @@ import XCTest
     let inputSource = String(viewSource[inputRange.lowerBound..<inputEnd.lowerBound])
 
     XCTAssertTrue(inputSource.contains(".beginVisibleMainQuery(message, fromVoice: false, animated: true)"))
-    // Archiving moved with the retired typed follow-up (#10181): the window's
-    // query paths own it now; the view must not archive on its own.
+    // Archiving moved with the retired typed follow-up: the window's query
+    // paths own it now; the view must not archive on its own.
     XCTAssertTrue(windowSource.contains("state.archiveCurrentExchange(using:"))
     XCTAssertFalse(viewSource.contains("archiveCurrentExchange"))
     XCTAssertTrue(viewSource.contains(".beginVisibleMainQuery(message, fromVoice: false, animated: true)"))
@@ -969,10 +1147,15 @@ import XCTest
 
     XCTAssertTrue(source.contains("On the first load of a saved conversation, follow the latest message."))
     // omi-test-quality: source-inspection -- static contract: startup history
-    // has one deferred restore; its behavioral counterpart asserts one atomic
-    // journal snapshot in KernelTurnRecordedProjectionTests.
-    XCTAssertTrue(source.contains("isInitialRestorePending = true"))
-    XCTAssertTrue(source.contains("DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)"))
+    // uses a retryable staged bottom restore; its behavioral counterpart asserts
+    // one atomic journal snapshot in KernelTurnRecordedProjectionTests.
+    XCTAssertTrue(source.contains("initialRestoreState = .pending"))
+    XCTAssertTrue(source.contains("completesInitialRestore"))
+    XCTAssertTrue(source.contains("initialRestoreState = .completed"))
+    XCTAssertFalse(
+      source.contains(".defaultScrollAnchor(.bottom)"),
+      "launch placement must remain cancelable instead of becoming a persistent bottom anchor"
+    )
     XCTAssertFalse(source.contains("scheduleInitialScroll(proxy: proxy, delay: 0.18)"))
     XCTAssertFalse(source.contains("scheduleInitialScroll(proxy: proxy, delay: 0.45)"))
     XCTAssertFalse(
@@ -981,9 +1164,19 @@ import XCTest
     )
     XCTAssertFalse(source.contains("viewportResizeDetector"))
     XCTAssertFalse(source.contains("handleViewportSizeChange"))
-    XCTAssertTrue(
-      source.contains(
-        "    scrollMode = .followingBottom\n    hasActivityBelow = false\n    userIsScrolling = false"))
+    // omi-test-quality: source-inspection -- static contract: geometry inside
+    // the LazyVStack must not feed transcript layout values back into state;
+    // the behavioral scroll coverage lives in ChatScrollLiveEdgeTests.
+    XCTAssertFalse(source.contains(".onGeometryChange(for: "))
+    // omi-test-quality: source-inspection -- static contract: a local send may
+    // enter follow mode, but must never clear the reader's in-flight gesture
+    // latch to do it; the behavioral coverage is in
+    // ChatTranscriptGestureHarnessTests.
+    XCTAssertTrue(source.contains("    scrollMode = .followingBottom\n    hasActivityBelow = false"))
+    XCTAssertFalse(
+      source.contains("    hasActivityBelow = false\n    userIsScrolling = false"),
+      "a send must not clear the reader's gesture latch in order to seize the viewport"
+    )
     XCTAssertFalse(source.contains("Find the last user message"))
   }
 
@@ -1000,6 +1193,7 @@ import XCTest
       scrollSource.contains("private func handleViewportSizeChange(_ size: CGSize, proxy: ScrollViewProxy)"))
     XCTAssertTrue(scrollSource.contains("scheduleSettledBottomFollow(proxy: proxy)"))
     XCTAssertTrue(scrollSource.contains("for delay in [0.05, 0.16, 0.32]"))
+    XCTAssertTrue(scrollSource.contains(".onChange(of: contentChangeToken)"))
     XCTAssertFalse(viewSource.contains("private func agentChatViewportResizeDetector"))
     XCTAssertFalse(viewSource.contains("private func scrollToBottomSettled(_ proxy: ScrollViewProxy)"))
   }
@@ -1359,7 +1553,8 @@ import XCTest
 
     // Both the Omi Chat header and subagent header should enter one shared
     // window transition. Back from a subagent goes to the row list on every
-    // display mode when pills exist; otherwise main-input/main-response.
+    // display mode when pills exist. Without a remaining row, chat-first hands typed entry to the
+    // main app while legacy can still restore its main-input/main-response surface.
     XCTAssertTrue(viewSource.contains("          onBackToAgentRows: {\n            showAgentListFromConversation()"))
     XCTAssertTrue(
       viewSource.contains(
@@ -1371,6 +1566,7 @@ import XCTest
     )
     XCTAssertTrue(windowSource.contains("private func showAgentRowsFromConversation()"))
     XCTAssertTrue(windowSource.contains("private func showMainConversationFromAgent()"))
+    XCTAssertTrue(windowSource.contains("routePrimaryTextInputToMainAppAfterAgentExit()"))
     XCTAssertTrue(windowSource.contains("state.hideConversationSurface()"))
     XCTAssertTrue(windowSource.contains("openNotchHoverMenuUntilExit()"))
     XCTAssertTrue(windowSource.contains("resizeForMainInputAfterAgentExit()"))
@@ -1574,24 +1770,20 @@ import XCTest
       openClaw.coloredPixels, 0, "OpenClaw row mark must be a template mask so status color owns identity.")
   }
 
-  func testFloatingAgentToolCallsUseCompactOneLinePresentation() throws {
+  func testFloatingAgentToolCallsUseSharedActivityTimelinePresentation() throws {
     let chatBubbleSource = try chatBubbleSource()
     let providerSource = try chatProviderSource()
 
     XCTAssertTrue(chatBubbleSource.contains("var compact: Bool = false"))
-    XCTAssertTrue(chatBubbleSource.contains("enum ToolCallsGroupExpansionPolicy"))
-    XCTAssertTrue(chatBubbleSource.contains("static func initiallyExpanded() -> Bool {\n    false"))
-    XCTAssertTrue(chatBubbleSource.contains("State(initialValue: ToolCallsGroupExpansionPolicy.initiallyExpanded())"))
-    XCTAssertTrue(chatBubbleSource.contains("private var header: some View"))
-    XCTAssertTrue(chatBubbleSource.contains("private var expandedToolCalls: some View"))
-    XCTAssertTrue(chatBubbleSource.contains("VStack(alignment: .leading, spacing: compact ? 0 : 6)"))
-    XCTAssertTrue(chatBubbleSource.contains(".frame(height: compact ? 34 : nil)"))
-    XCTAssertTrue(chatBubbleSource.contains("Image(systemName: isExpanded ? \"chevron.up\" : \"chevron.down\")"))
+    XCTAssertTrue(chatBubbleSource.contains("enum ToolActivityTimelinePresentation"))
+    XCTAssertTrue(chatBubbleSource.contains("connectsToNext: position < toolCalls.count - 1"))
+    XCTAssertTrue(chatBubbleSource.contains(".spring(response: 0.36, dampingFraction: 0.86)"))
+    XCTAssertTrue(chatBubbleSource.contains(".move(edge: .top).combined(with: .opacity)"))
+    XCTAssertTrue(chatBubbleSource.contains("ToolCallActivityHeadline(name: name, status: displayStatus)"))
     XCTAssertTrue(chatBubbleSource.contains("ToolCallCard(\n              name: name"))
-    XCTAssertTrue(chatBubbleSource.contains("agentOpenRef: block.agentOpenRef"))
+    XCTAssertTrue(chatBubbleSource.contains("agentOpenRef: item.block.agentOpenRef"))
     XCTAssertTrue(chatBubbleSource.contains("onOpenAgent: onOpenAgent"))
     XCTAssertTrue(chatBubbleSource.contains("onOpenAgentRef: onOpenAgentRef"))
-    XCTAssertTrue(chatBubbleSource.contains("summaryEmbeddedInToolName"))
     XCTAssertTrue(providerSource.contains("cleanName.lowercased().hasPrefix(\"read:\")"))
     XCTAssertTrue(providerSource.contains("return \"Reading file\""))
   }
@@ -1660,20 +1852,25 @@ import XCTest
     let tableRendererSource =
       rendererSource
       .components(separatedBy: "private struct OmiMarkdownTableView").last?
-      .components(separatedBy: "private struct CodeBlockCopyButton").first ?? ""
+      .components(separatedBy: "private struct OmiMarkdownCodeBlockView").first ?? ""
     XCTAssertTrue(rendererSource.contains("GridRow(alignment: .top)"))
-    XCTAssertTrue(rendererSource.contains("minHeight: row == 0 ? 40 : 44"))
+    XCTAssertFalse(rendererSource.contains("minHeight: row == 0 ? 40 : 44"))
     XCTAssertTrue(
       rendererSource.contains(
         ".frame(maxHeight: .infinity, alignment: columnAlignment.topAlignment)"
       )
     )
     XCTAssertTrue(rendererSource.contains(".background(rowBackground(row))"))
-    XCTAssertFalse(tableRendererSource.contains("ScrollView"))
+    XCTAssertTrue(tableRendererSource.contains("ScrollView(.horizontal, showsIndicators: true)"))
+    XCTAssertTrue(tableRendererSource.contains(".background(VerticalWheelPassthrough())"))
+    XCTAssertTrue(tableRendererSource.contains(".fixedSize(horizontal: false, vertical: true)"))
+    XCTAssertTrue(tableRendererSource.contains("OmiMarkdownInlineCopyText("))
     XCTAssertFalse(rendererSource.contains("@State private var document"))
     XCTAssertFalse(rendererSource.contains("attrCache"))
-    XCTAssertFalse(rendererSource.contains(".textSelection(.enabled)"))
     XCTAssertTrue(rendererSource.contains(".textSelection(.disabled)"))
+    XCTAssertFalse(rendererSource.contains(".textSelection(.enabled)"))
+    XCTAssertFalse(rendererSource.contains("textSelectionEnabled"))
+    XCTAssertTrue(tableRendererSource.contains(".textSelection(.disabled)"))
     XCTAssertFalse(rendererSource.contains("MarkdownTableCopyButton"))
     XCTAssertFalse(rendererSource.contains("Copy table"))
     XCTAssertFalse(chatBubbleSource.contains(".markdownTableBorderStyle"))
@@ -1770,17 +1967,23 @@ import XCTest
     }
   }
 
-  func testOmiMarkdownProvidesCopyOnlyForCodeBlocks() throws {
+  func testOmiMarkdownProvidesOneClickCopyForInlineAndFencedCode() throws {
     // omi-test-quality: source-inspection -- static contract: the reusable SwiftUI code-block
-    // renderer owns a leaf-state copy affordance; clipboard writes are exercised manually in the app.
+    // renderer owns the copy affordances; clipboard writes are exercised manually in the app.
     let source = try omiMarkdownSource()
 
     XCTAssertTrue(source.contains("private func codeBlockView(_ code: String, language: String?)"))
-    XCTAssertTrue(source.contains("private struct CodeBlockCopyButton: View"))
+    XCTAssertTrue(source.contains("private struct OmiMarkdownCodeBlockView: View"))
+    XCTAssertTrue(source.contains("private struct OmiMarkdownInlineCodeCopyButton: View"))
+    XCTAssertTrue(source.contains("private struct OmiMarkdownCopyToast: View"))
+    XCTAssertTrue(source.contains("Text(\"Copied\")"))
     XCTAssertFalse(source.contains("private struct MarkdownTableCopyButton: View"))
     XCTAssertTrue(source.contains("@State private var copied = false"))
-    XCTAssertTrue(source.contains("NSPasteboard.general.setString(code, forType: .string)"))
-    XCTAssertTrue(source.contains(".help(\"Copy code\")"))
+    XCTAssertTrue(source.contains("OmiMarkdownClipboard.copy(code)"))
+    XCTAssertTrue(source.contains("guard OmiMarkdownClipboard.copy(code) else"))
+    XCTAssertTrue(source.contains(".onTapGesture { copyCode() }"))
+    XCTAssertTrue(source.contains("Click anywhere in the code block to copy"))
+    XCTAssertTrue(source.contains(".accessibilityAction { copyCode() }"))
     XCTAssertFalse(source.contains("Copy table"))
   }
 
@@ -1849,14 +2052,6 @@ import XCTest
       .deletingLastPathComponent()
       .deletingLastPathComponent()
       .appendingPathComponent("Sources/Providers/ChatProvider.swift")
-    return try String(contentsOf: sourceURL, encoding: .utf8)
-  }
-
-  private func chatPageSource() throws -> String {
-    let sourceURL = URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .deletingLastPathComponent()
-      .appendingPathComponent("Sources/MainWindow/Pages/ChatPage.swift")
     return try String(contentsOf: sourceURL, encoding: .utf8)
   }
 
@@ -2107,6 +2302,25 @@ import XCTest
       .deletingLastPathComponent()
       .appendingPathComponent("Sources/Logger.swift")
     return try String(contentsOf: sourceURL, encoding: .utf8)
+  }
+}
+
+@MainActor
+private final class UncancellableRetractionScheduler: DelayedActionScheduling {
+  private var action: (@MainActor () -> Void)?
+
+  func schedule(
+    after interval: TimeInterval,
+    action: @escaping @MainActor () -> Void
+  ) -> DelayedActionCancellation {
+    _ = interval
+    self.action = action
+    return ManualDelayedActionCancellation()
+  }
+
+  func fire() {
+    action?()
+    action = nil
   }
 }
 

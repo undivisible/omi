@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -113,8 +115,24 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
         )
         self.write(
             ".github/workflows/gcp_fake.yml",
-            """steps:
-  - uses: ./.github/actions/deploy-public-build
+            """on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: false
+        default: 'prod'
+        type: choice
+        options: [development, prod]
+concurrency:
+  group: fake-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || github.ref == 'refs/heads/development' && 'development' || github.ref == 'refs/heads/main' && 'prod' || format('nondeploy-{0}', github.run_id) }}
+jobs:
+  deploy:
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.ref == 'refs/heads/development' && 'development') || 'prod' }}
+    steps:
+      - uses: ./.github/actions/deploy-public-build
+        with:
+          environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment || (github.ref == 'refs/heads/development' && 'development') || 'prod' }}
 """,
         )
         self.write(
@@ -148,6 +166,33 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
 
     def test_accepts_centralized_public_build_deployment(self) -> None:
         self.assertEqual(self.errors(), [])
+
+    def test_manual_development_dispatch_on_an_exact_pr_head_uses_development(self) -> None:
+        self.assertEqual(
+            STATIC.resolved_deploy_environment(
+                event_name="workflow_dispatch",
+                ref="refs/pull/10751/merge",
+                requested_environment="development",
+            ),
+            "development",
+        )
+        for workflow_name in ("gcp_admin.yml", "gcp_app.yml"):
+            with self.subTest(workflow=workflow_name):
+                workflow_path = ROOT / ".github" / "workflows" / workflow_name
+                self.assertEqual(
+                    STATIC.validate_manual_environment_dispatch(
+                        f".github/workflows/{workflow_name}", workflow_path.read_text(encoding="utf-8")
+                    ),
+                    [],
+                )
+
+    def test_manual_development_dispatch_rejects_an_unrecognized_environment(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must select development or prod"):
+            STATIC.resolved_deploy_environment(
+                event_name="workflow_dispatch",
+                ref="refs/pull/10751/merge",
+                requested_environment="preview",
+            )
 
     def test_rejects_direct_build_or_deploy_wiring(self) -> None:
         self.write(
@@ -195,6 +240,9 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
                         deployment[name] = {} if name in {"runtime_secrets", "runtime_env_vars"} else []
                     deployment[left] = binding_groups[left]
                     deployment[right] = binding_groups[right]
+                    deployment["fallback_runtime_secrets"] = {
+                        name: f"fallback-{name.lower()}:latest" for name in deployment["preserve_runtime_secrets"]
+                    }
                     self.write_json("config/public-build-contract.json", contract)
 
                     with self.assertRaisesRegex(ValueError, "runtime binding groups cannot overlap"):
@@ -222,6 +270,20 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
         self.assertEqual(
             STATIC.validate_target(self.root, self.target(), {"FAKE_PUBLIC_INPUT"}),
             ["fake: runtime env FAKE_RUNTIME_CONFIG is not classified config"],
+        )
+
+    def test_gateway_required_target_rejects_missing_or_empty_gateway_wiring(self) -> None:
+        contract = fixture_contract()
+        contract["targets"]["fake"]["gateway_required"] = True
+        self.write_json("config/public-build-contract.json", contract)
+
+        self.assertEqual(
+            STATIC.validate_target(self.root, self.target(), {"FAKE_PUBLIC_INPUT"}),
+            [
+                ".github/workflows/gcp_fake.yml: gateway-required target must source "
+                "OMI_LLM_GATEWAY_URL from GitHub environment vars",
+                ".github/workflows/gcp_fake.yml: gateway-required target must reject an empty " "OMI_LLM_GATEWAY_URL",
+            ],
         )
 
     def test_runtime_preflight_rejects_literal_binding(self) -> None:
@@ -467,6 +529,9 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
     def test_runtime_preflight_preserves_the_live_secret_reference_without_guessing_it(self) -> None:
         contract = fixture_contract()
         contract["targets"]["fake"]["deployment"]["preserve_runtime_secrets"] = ["PRESERVED_RUNTIME_SECRET"]
+        contract["targets"]["fake"]["deployment"]["fallback_runtime_secrets"] = {
+            "PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"
+        }
         self.write_json("config/public-build-contract.json", contract)
         service = {
             "template": {
@@ -506,6 +571,9 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
     def test_runtime_preflight_rejects_a_disabled_preserved_secret_version(self) -> None:
         contract = fixture_contract()
         contract["targets"]["fake"]["deployment"]["preserve_runtime_secrets"] = ["PRESERVED_RUNTIME_SECRET"]
+        contract["targets"]["fake"]["deployment"]["fallback_runtime_secrets"] = {
+            "PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"
+        }
         self.write_json("config/public-build-contract.json", contract)
         service = {
             "template": {
@@ -541,6 +609,9 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
     def test_runtime_preflight_rejects_missing_or_literal_preserved_secret(self) -> None:
         contract = fixture_contract()
         contract["targets"]["fake"]["deployment"]["preserve_runtime_secrets"] = ["PRESERVED_RUNTIME_SECRET"]
+        contract["targets"]["fake"]["deployment"]["fallback_runtime_secrets"] = {
+            "PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"
+        }
         self.write_json("config/public-build-contract.json", contract)
         literal_service = {
             "template": {"containers": [{"env": [{"name": "PRESERVED_RUNTIME_SECRET", "value": "not-a-secret"}]}]}
@@ -562,6 +633,9 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
     def test_runtime_preflight_rejects_a_literal_secret_union_for_a_preserved_binding(self) -> None:
         contract = fixture_contract()
         contract["targets"]["fake"]["deployment"]["preserve_runtime_secrets"] = ["PRESERVED_RUNTIME_SECRET"]
+        contract["targets"]["fake"]["deployment"]["fallback_runtime_secrets"] = {
+            "PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"
+        }
         self.write_json("config/public-build-contract.json", contract)
         service = {
             "template": {
@@ -588,24 +662,169 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
             ["fake-service: runtime binding PRESERVED_RUNTIME_SECRET has an ambiguous or malformed value source"],
         )
 
-    def test_runtime_preflight_requires_a_live_service_to_preserve_secret_bindings(self) -> None:
+    def test_runtime_preflight_uses_declared_fallback_bindings_for_a_first_create(self) -> None:
         contract = fixture_contract()
         contract["targets"]["fake"]["deployment"]["preserve_runtime_secrets"] = ["PRESERVED_RUNTIME_SECRET"]
+        contract["targets"]["fake"]["deployment"]["fallback_runtime_secrets"] = {
+            "PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"
+        }
         self.write_json("config/public-build-contract.json", contract)
         original_validate = RUNTIME_PREFLIGHT.validate_secret_versions
         original_load = RUNTIME_PREFLIGHT.load_current_service
+        original_fallback = RUNTIME_PREFLIGHT.validate_fallback_secret_versions
         RUNTIME_PREFLIGHT.validate_secret_versions = lambda **_kwargs: []
         RUNTIME_PREFLIGHT.load_current_service = lambda **_kwargs: None
+        RUNTIME_PREFLIGHT.validate_fallback_secret_versions = lambda **_kwargs: []
         try:
-            errors = RUNTIME_PREFLIGHT.preflight(target=self.target(), project_id="fake-project")
+            errors, fallbacks = RUNTIME_PREFLIGHT.preflight_result(target=self.target(), project_id="fake-project")
         finally:
             RUNTIME_PREFLIGHT.validate_secret_versions = original_validate
             RUNTIME_PREFLIGHT.load_current_service = original_load
+            RUNTIME_PREFLIGHT.validate_fallback_secret_versions = original_fallback
 
-        self.assertEqual(
-            errors,
-            ["fake: cannot preserve runtime secrets because current Cloud Run service fake-service is absent"],
+        self.assertEqual(errors, [])
+        self.assertEqual(fallbacks, {"PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"})
+
+    def test_runtime_preflight_reports_first_create_to_the_deployment_action(self) -> None:
+        output = self.root / "runtime-preflight-output"
+        original_result = RUNTIME_PREFLIGHT.preflight_deployment_result
+        RUNTIME_PREFLIGHT.preflight_deployment_result = lambda **_kwargs: ([], {}, False)
+        try:
+            result = RUNTIME_PREFLIGHT.main(
+                [
+                    "--target",
+                    "fake",
+                    "--project-id",
+                    "fake-project",
+                    "--contract",
+                    str(self.root / "config/public-build-contract.json"),
+                    "--github-output",
+                    str(output),
+                ]
+            )
+        finally:
+            RUNTIME_PREFLIGHT.preflight_deployment_result = original_result
+
+        self.assertEqual(result, 0)
+        self.assertIn("service_exists=false", output.read_text(encoding="utf-8"))
+
+    def test_shared_action_handles_first_creates_and_fails_closed_for_production(self) -> None:
+        deploy = (ROOT / ".github/actions/deploy-public-build/action.yml").read_text(encoding="utf-8")
+        promotion = (ROOT / ".github/actions/public-build-candidate-promotion/action.yml").read_text(encoding="utf-8")
+
+        self.assertIn("steps.runtime-preflight.outputs.service_exists", deploy)
+        self.assertIn("no_traffic: ${{ steps.runtime-preflight.outputs.service_exists == 'true' }}", deploy)
+        self.assertIn("Fail closed for a production first create", deploy)
+        self.assertIn("refusing to create a public Cloud Run service outside development", deploy)
+        self.assertIn("inputs.environment == 'development' && '--allow-unauthenticated' || ''", deploy)
+        self.assertNotIn("first_create", promotion)
+
+    def test_runtime_preflight_never_outputs_fallback_bindings_for_a_live_service(self) -> None:
+        contract = fixture_contract()
+        contract["targets"]["fake"]["deployment"]["preserve_runtime_secrets"] = ["PRESERVED_RUNTIME_SECRET"]
+        contract["targets"]["fake"]["deployment"]["fallback_runtime_secrets"] = {
+            "PRESERVED_RUNTIME_SECRET": "fallback-secret:latest"
+        }
+        self.write_json("config/public-build-contract.json", contract)
+        service = {
+            "template": {
+                "containers": [
+                    {
+                        "env": [
+                            {
+                                "name": "PRESERVED_RUNTIME_SECRET",
+                                "valueSource": {"secretKeyRef": {"secret": "live-secret", "version": "7"}},
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+        original_validate = RUNTIME_PREFLIGHT.validate_secret_versions
+        original_load = RUNTIME_PREFLIGHT.load_current_service
+        original_validate_current = RUNTIME_PREFLIGHT.validate_current_bindings
+        original_validate_preserved = RUNTIME_PREFLIGHT.validate_preserved_secret_versions
+        RUNTIME_PREFLIGHT.validate_secret_versions = lambda **_kwargs: []
+        RUNTIME_PREFLIGHT.load_current_service = lambda **_kwargs: service
+        RUNTIME_PREFLIGHT.validate_current_bindings = lambda *_args: []
+        RUNTIME_PREFLIGHT.validate_preserved_secret_versions = lambda **_kwargs: []
+        try:
+            errors, fallbacks = RUNTIME_PREFLIGHT.preflight_result(target=self.target(), project_id="fake-project")
+        finally:
+            RUNTIME_PREFLIGHT.validate_secret_versions = original_validate
+            RUNTIME_PREFLIGHT.load_current_service = original_load
+            RUNTIME_PREFLIGHT.validate_current_bindings = original_validate_current
+            RUNTIME_PREFLIGHT.validate_preserved_secret_versions = original_validate_preserved
+
+        self.assertEqual(errors, [])
+        self.assertEqual(fallbacks, {})
+
+    def test_runtime_preflight_treats_an_authenticated_empty_service_list_as_first_create(self) -> None:
+        original_run = RUNTIME_PREFLIGHT.subprocess.run
+        RUNTIME_PREFLIGHT.subprocess.run = lambda *_args, **_kwargs: type("Result", (), {"stdout": "[]"})()
+        try:
+            self.assertIsNone(RUNTIME_PREFLIGHT.load_current_service(target=self.target(), project_id="fake-project"))
+        finally:
+            RUNTIME_PREFLIGHT.subprocess.run = original_run
+
+    def test_runtime_preflight_does_not_infer_first_create_from_describe_text(self) -> None:
+        original_run = RUNTIME_PREFLIGHT.subprocess.run
+        calls: list[list[str]] = []
+
+        def run(command, **_kwargs):
+            calls.append(command)
+            if "list" in command:
+                return type("Result", (), {"stdout": '[{"metadata": {"name": "fake-service"}}]'})()
+            raise RUNTIME_PREFLIGHT.subprocess.CalledProcessError(
+                1, command, stderr="ERROR: Service [fake-service] could not be found"
+            )
+
+        RUNTIME_PREFLIGHT.subprocess.run = run
+        try:
+            with self.assertRaisesRegex(
+                RUNTIME_PREFLIGHT.RuntimePreflightError,
+                "cannot inspect current Cloud Run service fake-service: gcloud command failed: ERROR: Service",
+            ):
+                RUNTIME_PREFLIGHT.load_current_service(target=self.target(), project_id="fake-project")
+        finally:
+            RUNTIME_PREFLIGHT.subprocess.run = original_run
+        self.assertEqual(2, len(calls))
+
+    def test_runtime_preflight_redacts_unknown_gcloud_diagnostic(self) -> None:
+        original_run = RUNTIME_PREFLIGHT.subprocess.run
+        RUNTIME_PREFLIGHT.subprocess.run = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RUNTIME_PREFLIGHT.subprocess.CalledProcessError(
+                1, "gcloud", stderr="backend rejected access_token=should-not-appear"
+            )
         )
+        try:
+            with self.assertRaises(RUNTIME_PREFLIGHT.RuntimePreflightError) as raised:
+                RUNTIME_PREFLIGHT.load_current_service(target=self.target(), project_id="fake-project")
+        finally:
+            RUNTIME_PREFLIGHT.subprocess.run = original_run
+        self.assertIn("access_token=[REDACTED]", str(raised.exception))
+        self.assertNotIn("should-not-appear", str(raised.exception))
+
+    def test_runtime_preflight_redacts_bearer_and_quoted_credentials(self) -> None:
+        original_run = RUNTIME_PREFLIGHT.subprocess.run
+        diagnostics = (
+            ("Bearer ya29.standalone-secret-token", "standalone-secret-token"),
+            ("Authorization: Bearer ya29.bearer-secret-token", "bearer-secret-token"),
+            ('{"access_token": "ya29.quoted-secret"}', "ya29.quoted-secret"),
+            ('{"authorization": "Bearer ya29.quoted-bearer"}', "ya29.quoted-bearer"),
+        )
+        try:
+            for stderr, secret_fragment in diagnostics:
+                with self.subTest(stderr=stderr):
+                    RUNTIME_PREFLIGHT.subprocess.run = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        RUNTIME_PREFLIGHT.subprocess.CalledProcessError(1, "gcloud", stderr=stderr)
+                    )
+                    with self.assertRaises(RUNTIME_PREFLIGHT.RuntimePreflightError) as raised:
+                        RUNTIME_PREFLIGHT.load_current_service(target=self.target(), project_id="fake-project")
+                    self.assertNotIn(secret_fragment, str(raised.exception))
+                    self.assertIn("[REDACTED]", str(raised.exception))
+        finally:
+            RUNTIME_PREFLIGHT.subprocess.run = original_run
 
     def test_runtime_preflight_rejects_secret_where_reviewed_runtime_config_will_be_applied(self) -> None:
         contract = fixture_contract()
@@ -641,16 +860,28 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
         self.assertEqual(personas.deployment.runtime_secrets["LINKEDIN_API_KEY"], "NEXT_PUBLIC_LINKEDIN_API_KEY:latest")
         self.assertEqual(
             personas.deployment.runtime_env_vars,
-            {"LINKEDIN_RAPIDAPI_HOST": "linkedin-api8.p.rapidapi.com"},
+            {
+                "LINKEDIN_RAPIDAPI_HOST": "linkedin-api8.p.rapidapi.com",
+            },
         )
         self.assertEqual(
             personas.deployment.preserve_runtime_secrets,
             ("REDIS_HOST", "REDIS_PASSWORD", "NEXT_PUBLIC_OMI_APP_ID", "NEXT_PUBLIC_OMI_API_KEY"),
         )
         self.assertEqual(
+            personas.deployment.fallback_runtime_secrets,
+            {
+                "REDIS_HOST": "REDIS_HOST:latest",
+                "REDIS_PASSWORD": "REDIS_PASSWORD:latest",
+                "NEXT_PUBLIC_OMI_APP_ID": "NEXT_PUBLIC_OMI_APP_ID:latest",
+                "NEXT_PUBLIC_OMI_API_KEY": "NEXT_PUBLIC_OMI_API_KEY:latest",
+            },
+        )
+        self.assertEqual(
             personas.deployment.remove_runtime_secrets,
             (
                 "LINKEDIN_API_HOST",
+                "NEXT_PUBLIC_LINKEDIN_API_HOST",
                 "NEXT_PUBLIC_FIREBASE_API_KEY",
                 "NEXT_PUBLIC_FIREBASE_APP_ID",
                 "NEXT_PUBLIC_FIREBASE_VAPID_KEY",
@@ -723,6 +954,15 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
         readme = (ROOT / "web/personas-open-source/README.md").read_text(encoding="utf-8")
         self.assertIn("/rockapis-rockapis-default/api/linkedin-api8", readme)
         self.assertIn("LINKEDIN_RAPIDAPI_HOST=linkedin-api8.p.rapidapi.com", readme)
+
+        personas_workflow = (ROOT / ".github/workflows/gcp_personas.yml").read_text(encoding="utf-8")
+        self.assertIn("network: ${{ vars.CLOUD_RUN_VPC_NETWORK }}", personas_workflow)
+        self.assertIn("subnet: ${{ vars.CLOUD_RUN_VPC_SUBNET }}", personas_workflow)
+        self.assertIn(
+            "runtime_env_vars: OMI_LLM_GATEWAY_URL=${{ vars.OMI_LLM_GATEWAY_URL }}",
+            personas_workflow,
+        )
+        self.assertIn("require_gateway_url: true", personas_workflow)
 
     def test_rejects_a_required_value_missing_from_reviewed_source(self) -> None:
         contract = STATIC.load_contract(self.root / "config/public-build-contract.json")
@@ -814,6 +1054,27 @@ RUN for name in $OMI_REQUIRED_PUBLIC_BUILD_INPUTS; do value="$(printenv "$name" 
             SMOKE.render_candidate = original
 
         self.assertTrue(True)
+
+    def test_browser_smoke_prints_a_sanitized_reason(self) -> None:
+        original = SMOKE.smoke
+
+        def fail_smoke(**_kwargs) -> None:
+            raise SMOKE.BrowserSmokeError("client public-build canary did not become ready")
+
+        SMOKE.smoke = fail_smoke
+        stderr = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(stderr):
+                result = SMOKE.main(["--target", "fake", "--base-url", "https://candidate.example"])
+        finally:
+            SMOKE.smoke = original
+
+        self.assertEqual(result, 1)
+        self.assertIn("reason=client public-build canary did not become ready", stderr.getvalue())
+        self.assertEqual(
+            SMOKE.sanitized_browser_smoke_reason(SMOKE.BrowserSmokeError("secret=not-for-logs")),
+            "unspecified browser smoke failure",
+        )
 
 
 if __name__ == "__main__":

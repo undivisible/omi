@@ -170,6 +170,7 @@ struct FloatingControlBarView: View {
 
           if let notification = state.currentNotification, !state.showingAIConversation {
             barNotification(notification)
+              .floatingBackground(cornerRadius: 18)
               .padding(.horizontal, OmiSpacing.sm)
               .padding(.bottom, OmiSpacing.sm)
               .transition(.move(edge: .top).combined(with: .opacity))
@@ -223,6 +224,12 @@ struct FloatingControlBarView: View {
 
   private var showingPTTStatusBanner: Bool {
     !state.pttHintText.isEmpty
+  }
+
+  /// The notch "speaking" state: response audio is playing (or draining), so
+  /// the resting ring pulses like a speaker instead of sitting static.
+  private var showingNotchSpeaking: Bool {
+    state.isVoiceResponseGlowActive && !state.isVoiceListening
   }
 
   private var unifiedFloatingSurface: some View {
@@ -285,6 +292,25 @@ struct FloatingControlBarView: View {
           )
           .frame(width: notchChromeLayoutWidth, height: notchChromeHeight + notchHoverMenuHeight)
           .allowsHitTesting(notchSwitcherProgress > 0.6)
+
+          // Shortcut legend + capture controls, hugging the trailing edge of the
+          // expanded surface — the notch's right side, revealed on hover.
+          VStack {
+            NotchSystemControlsView(progress: notchSwitcherProgress)
+              .padding(
+                .top,
+                notchChromeHeight
+                  + FloatingControlBarWindow.notchControlPanelTopOffset(agentCount: agentPills.pills.count)
+                  + OmiSpacing.xs
+              )
+              .padding(.trailing, OmiSpacing.md)
+            Spacer(minLength: 0)
+          }
+          .frame(
+            width: notchChromeLayoutWidth,
+            height: notchChromeHeight + notchHoverMenuHeight,
+            alignment: .topTrailing
+          )
 
           notchAgentLogoHitTarget
             .frame(width: notchChromeLayoutWidth, height: notchChromeHeight)
@@ -412,17 +438,17 @@ struct FloatingControlBarView: View {
         }
         return
       }
-      // Fixed window, animated content: in notch mode the NSPanel frame
-      // never moves for hover expand/collapse — this value carries the
-      // ENTIRE visible morph (black surface height/width, row reveal,
-      // dot fan-out). A gentle spring on open, a bounce-free settle on
-      // close, both Reduce Motion-gated.
+      // SwiftUI carries the visible morph. The panel expands before the content
+      // and collapses only when this animation reports that it has settled.
       let morphAnim: Animation =
         visible
         ? FloatingControlBarWindow.notchHoverMenuExpandAnimation
         : FloatingControlBarWindow.notchHoverMenuCollapseAnimation
-      OmiMotion.withGated(morphAnim) {
+      withAnimation(OmiMotion.gated(morphAnim), completionCriteria: .logicallyComplete) {
         notchSwitcherProgress = visible ? 1 : 0
+      } completion: {
+        guard !visible, !state.isNotchHoverMenuVisible else { return }
+        (window as? FloatingControlBarWindow)?.settleNotchAgentSwitcherCollapse()
       }
     }
     .onChange(of: state.isVoicePresentationActive) { _, active in
@@ -457,13 +483,7 @@ struct FloatingControlBarView: View {
   }
 
   /// Size of the visible black surface behind the floating content.
-  ///
-  /// Notch idle ↔ hover lifecycle: the NSPanel frame is FIXED at the maximum
-  /// hover surface, so the visible surface must derive from the content
-  /// morph (`notchSwitcherProgress`), not from the window geometry — the
-  /// spring on that progress IS the expand/collapse animation. Other states
-  /// (chat, voice, notification, PTT hint) still resize the panel and keep
-  /// the geometry-driven surface.
+  /// Notch hover follows the content morph while AppKit snaps at its boundaries.
   private func floatingSurfaceSize(geometry: GeometryProxy) -> CGSize {
     let notchHoverLifecycle = NotchHoverSurfacePolicy.usesAnimatedHoverSurface(
       usesNotchIsland: state.usesNotchIsland,
@@ -513,31 +533,29 @@ struct FloatingControlBarView: View {
 
   private var notchAgentLobe: some View {
     HStack(spacing: 0) {
-      if showingNotchWaveform {
-        VoiceWaveformBars(isActive: true)
-          .scaleEffect(0.72)
-          .frame(width: 28, height: 15)
-          .frame(width: 38, height: 27)
-      } else if showingNotchThinking {
-        NotchThinkingMark()
-          .frame(width: 24, height: 24)
-          .frame(width: notchSideWidth, height: notchChromeHeight, alignment: .trailing)
-          .padding(.trailing, OmiSpacing.hairline)
-      } else {
-        ZStack(alignment: .trailing) {
-          // The Omi mark always belongs to the compact notch header.
-          // Hover rows reveal below it; they must never borrow or
-          // animate this header identity into the expanded surface.
-          NotchAgentPillsRowView(manager: agentPills, barWindow: window)
-            .scaleEffect(notchLogoHovering ? 1.06 : 1.0)
-        }
-        .frame(width: notchSideWidth, height: notchChromeHeight, alignment: .trailing)
-        .padding(.trailing, OmiSpacing.hairline)
-        .contentShape(Rectangle())
-        .onHover { setNotchLogoHovering($0) }
-        .onTapGesture {
-          openAgentChatsFromNotchLogo()
-        }
+      ZStack(alignment: .trailing) {
+        // One always-mounted identity mark owns idle, PTT, and thinking
+        // presentation. The reducer still owns the voice lifecycle; this view
+        // only morphs its read-only projection at the mark's existing position.
+        NotchAgentPillsRowView(
+          manager: agentPills,
+          barWindow: window,
+          isVoiceListening: showingNotchWaveform,
+          isThinking: showingNotchThinking,
+          isSpeaking: showingNotchSpeaking
+        )
+        .scaleEffect(notchLogoHovering ? 1.06 : 1.0)
+      }
+      .frame(width: notchSideWidth, height: notchChromeHeight, alignment: .trailing)
+      .padding(.trailing, OmiSpacing.hairline)
+      .contentShape(Rectangle())
+      .onHover { hovering in
+        guard !state.isVoicePresentationActive else { return }
+        setNotchLogoHovering(hovering)
+      }
+      .onTapGesture {
+        guard !state.isVoicePresentationActive else { return }
+        openAgentChatsFromNotchLogo()
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
@@ -553,8 +571,82 @@ struct FloatingControlBarView: View {
       notchReceiptCard(notification)
     } else if notification.assistantId == NotchMoment.endAssistantId {
       notchEndCard(notification)
+    } else if notification.assistantId == "suggestion" {
+      suggestionCard(notification)
     } else {
       notificationView(notification)
+    }
+  }
+
+  /// Live proactive suggestion. Monochrome and quiet by design — this card interrupts
+  /// unprompted, so it earns attention with the sentence, not with chrome.
+  private func suggestionCard(_ notification: FloatingBarNotification) -> some View {
+    Button {
+      FloatingControlBarManager.shared.openNotificationAsChat(notification)
+    } label: {
+      HStack(alignment: .top, spacing: OmiSpacing.md) {
+        ZStack {
+          RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .fill(
+              LinearGradient(
+                colors: [Color.white.opacity(0.18), Color.white.opacity(0.08)],
+                startPoint: .top,
+                endPoint: .bottom
+              )
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .frame(width: 44, height: 44)
+
+          Image(systemName: "lightbulb.fill")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundColor(.white)
+        }
+
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Suggested by Omi")
+            .scaledFont(size: OmiType.caption, weight: .semibold)
+            .foregroundColor(.white.opacity(0.5))
+            .lineLimit(1)
+
+          Text(notification.message)
+            .scaledFont(size: OmiType.subheading, weight: .medium)
+            .foregroundColor(.white)
+            .lineLimit(3)
+            .multilineTextAlignment(.leading)
+            .lineSpacing(1.5)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+
+        Spacer(minLength: OmiSpacing.xs)
+
+        // Reserve room so copy never runs under the overlaid dismiss button.
+        Color.clear
+          .frame(width: 28, height: 20)
+      }
+      .padding(.horizontal, OmiSpacing.lg)
+      .padding(.vertical, OmiSpacing.md + 2)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .overlay(alignment: .topTrailing) {
+      Button {
+        FloatingControlBarManager.shared.dismissCurrentNotification()
+      } label: {
+        Image(systemName: "xmark")
+          .font(.system(size: 10, weight: .bold))
+          .foregroundColor(.white.opacity(0.62))
+          .frame(width: 18, height: 18)
+          .background(Color.white.opacity(0.08))
+          .clipShape(Circle())
+      }
+      .buttonStyle(.plain)
+      .padding(.horizontal, OmiSpacing.md)
+      .padding(.vertical, OmiSpacing.md)
+      .accessibilityLabel("Dismiss suggestion")
     }
   }
 
@@ -734,7 +826,7 @@ struct FloatingControlBarView: View {
 
   @ViewBuilder
   private var barContextMenu: some View {
-    Button("Disable for 2 hours") {
+    Button("Hide for 2 hours") {
       FloatingControlBarManager.shared.snooze(
         for: FloatingControlBarManager.snoozeTwoHoursDuration
       )
@@ -945,7 +1037,7 @@ struct FloatingControlBarView: View {
       isVoicePresentationActive: state.isVoicePresentationActive,
       isShowingConversation: state.showingAIConversation,
       openMainChat: {
-        (NSApp.delegate as? AppDelegate)?.openMainAppChat()
+        AppDelegate.summonWindowTarget()?.openMainAppChat()
       }
     )
   }
@@ -1004,10 +1096,14 @@ struct FloatingControlBarView: View {
     if effectiveHover {
       didExpand = (window as? FloatingControlBarWindow)?.resizeForHover(expanded: true) ?? false
     }
-    OmiMotion.withGated(.easeOut(duration: FloatingControlBarWindow.notchHoverMenuExpandDuration)) {
+    let hoverAnimation = Animation.easeOut(duration: FloatingControlBarWindow.notchHoverMenuExpandDuration)
+    withAnimation(OmiMotion.gated(hoverAnimation), completionCriteria: .logicallyComplete) {
       isHovering = effectiveHover && didExpand
+    } completion: {
+      guard state.usesNotchIsland, !effectiveHover, !state.isHoveringBar else { return }
+      (window as? FloatingControlBarWindow)?.resizeForHover(expanded: false)
     }
-    if !effectiveHover {
+    if !effectiveHover, !state.usesNotchIsland {
       (window as? FloatingControlBarWindow)?.resizeForHover(expanded: false)
     }
   }
@@ -1015,11 +1111,7 @@ struct FloatingControlBarView: View {
   private func isWithinActivationZoneForCurrentMode() -> Bool {
     guard state.usesNotchIsland else { return true }
     guard let window else { return false }
-    // The notch window frame is fixed at the maximum hover surface, so the
-    // activation zone must be derived from the VISIBLE content (collapsed
-    // chrome when idle, the current-agent-count menu when open), never
-    // from the window frame — otherwise hover triggers far below/beside
-    // the visible island.
+    // Exclude the transparent glow margin from hover activation.
     let hitHeight =
       state.isAgentSwitcherExpanded
       ? max(notchChromeHeight, notchChromeHeight + notchHoverMenuHeight)
@@ -1050,27 +1142,38 @@ struct FloatingControlBarView: View {
     Button {
       FloatingControlBarManager.shared.openNotificationAsChat(notification)
     } label: {
-      HStack(alignment: .top, spacing: 10) {
+      HStack(alignment: .top, spacing: OmiSpacing.md) {
         ZStack {
-          RoundedRectangle(cornerRadius: 10)
-            .fill(Color.white.opacity(0.08))
-            .frame(width: 34, height: 34)
+          RoundedRectangle(cornerRadius: 13, style: .continuous)
+            .fill(
+              LinearGradient(
+                colors: [Color.white.opacity(0.18), Color.white.opacity(0.08)],
+                startPoint: .top,
+                endPoint: .bottom
+              )
+            )
+            .overlay(
+              RoundedRectangle(cornerRadius: 13, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+            )
+            .frame(width: 44, height: 44)
 
           Image(systemName: "bell.badge.fill")
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: 18, weight: .semibold))
             .foregroundColor(.white)
         }
 
-        VStack(alignment: .leading, spacing: OmiSpacing.xxs) {
+        VStack(alignment: .leading, spacing: 3) {
           Text(notification.title)
-            .scaledFont(size: OmiType.body, weight: .semibold)
+            .scaledFont(size: OmiType.subheading, weight: .semibold)
             .foregroundColor(.white)
             .lineLimit(1)
 
           Text(notification.message)
-            .scaledFont(size: 12)
-            .foregroundColor(.white.opacity(0.72))
+            .scaledFont(size: OmiType.body)
+            .foregroundColor(.white.opacity(0.78))
             .lineLimit(3)
+            .lineSpacing(1.5)
             .fixedSize(horizontal: false, vertical: true)
         }
 
@@ -1079,10 +1182,10 @@ struct FloatingControlBarView: View {
         // Reserve space so text never runs under the overlaid action buttons.
         // Wider for actionable (task) notifications that also show Execute.
         Color.clear
-          .frame(width: notification.assistantId == "task" ? 90 : 36, height: 18)
+          .frame(width: notification.assistantId == "task" ? 96 : 40, height: 20)
       }
-      .padding(.horizontal, OmiSpacing.md)
-      .padding(.vertical, OmiSpacing.md)
+      .padding(.horizontal, OmiSpacing.lg)
+      .padding(.vertical, OmiSpacing.md + 2)
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
     }
@@ -1141,7 +1244,6 @@ struct FloatingControlBarView: View {
       .padding(.horizontal, OmiSpacing.md)
       .padding(.vertical, OmiSpacing.md)
     }
-    .floatingBackground(cornerRadius: 18)
   }
 
   private var controlBarView: some View {
@@ -1639,50 +1741,6 @@ private struct NotchResponseGlowView: View {
   }
 }
 
-private struct NotchOmiMark: View {
-  var dotColors: [Color] = []
-
-  private static let dotCount = 8
-  private static let dotDiameterRatio: CGFloat = 0.18
-  private static let ringRadiusRatio: CGFloat = 0.33
-
-  var body: some View {
-    GeometryReader { geometry in
-      let size = min(geometry.size.width, geometry.size.height)
-      let center = CGPoint(
-        x: geometry.size.width / 2,
-        y: geometry.size.height / 2
-      )
-      let dotDiameter = size * Self.dotDiameterRatio
-      let ringRadius = size * Self.ringRadiusRatio
-
-      ZStack {
-        ForEach(0..<Self.dotCount, id: \.self) { index in
-          let angle = Double(index) / Double(Self.dotCount) * Double.pi * 2 - Double.pi
-          Circle()
-            .fill(dotColors.indices.contains(index) ? dotColors[index] : Color.white.opacity(0.96))
-            .frame(width: dotDiameter, height: dotDiameter)
-            .position(
-              x: center.x + CGFloat(cos(angle)) * ringRadius,
-              y: center.y + CGFloat(sin(angle)) * ringRadius
-            )
-        }
-      }
-    }
-    .drawingGroup(opaque: false, colorMode: .linear)
-    .accessibilityHidden(true)
-  }
-}
-
-/// The Omi mark rendered as a spinning "thinking" indicator. The ring's dots
-/// carry a brightness trail (bright head → faint tail) so the continuous
-/// rotation reads as a sweeping comet rather than a static ring of dots.
-private struct NotchThinkingMark: View {
-  var body: some View {
-    OmiThinkingMark()
-  }
-}
-
 private struct SubagentChatPointer: Shape {
   func path(in rect: CGRect) -> Path {
     var path = Path()
@@ -2030,6 +2088,9 @@ private struct AgentMainChatView: View {
           case .discoveryCard(_, let title, let summary, let fullText):
             DiscoveryCard(title: title, summary: summary, fullText: fullText)
               .frame(maxWidth: .infinity, alignment: .leading)
+          // Rich controls are main-chat-only; floating/notch stays passive.
+          case .questionCard, .taskCard, .goalLink, .captureLink, .conversationLink, .memoryLink:
+            EmptyView()
           case .agentSpawn(
             _, let pillId, let sessionId, let runId, let title, let objective, let provider
           ):
@@ -2175,6 +2236,9 @@ private struct AgentStatusGlow: ViewModifier {
 private struct NotchAgentPillsRowView: View {
   @ObservedObject var manager: AgentPillsManager
   weak var barWindow: NSWindow?
+  let isVoiceListening: Bool
+  let isThinking: Bool
+  let isSpeaking: Bool
   @State private var pillStatusCancellables: [UUID: AnyCancellable] = [:]
   @State private var pillStatusChangeToken = 0
 
@@ -2184,15 +2248,30 @@ private struct NotchAgentPillsRowView: View {
 
   var body: some View {
     let _ = pillStatusChangeToken
-    NotchAgentOmiIndicatorView(pills: stackedPills)
-      .frame(width: 21, height: 21)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-      .accessibilityLabel("Subagent status")
-      .accessibilityHint("Hover to fan out subagents, click to keep them open")
-      .onAppear { syncPillStatusObservers() }
-      .onChange(of: manager.pills.map(\.id)) { _, _ in
-        syncPillStatusObservers()
-      }
+    NotchVoiceMorphMark(
+      dotColors: stackedPills.prefix(NotchAgentStackMetrics.maxAgents).map {
+        NotchAgentStatusGroup(status: $0.status).color
+      },
+      isListening: isVoiceListening,
+      isThinking: isThinking,
+      isSpeaking: isSpeaking
+    )
+    // Keep every PTT dot inside the same 21pt identity slot as the resting
+    // Omi mark. The slot is frontmost and trails the visible left lobe, so the
+    // physical notch/header surface cannot cover or crop the waveform.
+    .frame(
+      width: NotchVoiceMorphGeometry.markSize.width,
+      height: NotchVoiceMorphGeometry.markSize.height
+    )
+    .zIndex(1)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+    .accessibilityIdentifier("notch_voice_morph_mark")
+    .accessibilityLabel("Subagent status")
+    .accessibilityHint("Hover to fan out subagents, click to keep them open")
+    .onAppear { syncPillStatusObservers() }
+    .onChange(of: manager.pills.map(\.id)) { _, _ in
+      syncPillStatusObservers()
+    }
   }
 
   private func syncPillStatusObservers() {
@@ -2271,19 +2350,6 @@ private enum NotchAgentStackMetrics {
   /// The expanded-row identity mark uses the full orb size. The fixed header
   /// owns the compact Omi ring independently.
   static let logoDotScale: CGFloat = (logoFrameSize * logoDotDiameterRatio) / listOrbSize
-}
-
-private struct NotchAgentOmiIndicatorView: View {
-  let pills: [AgentPill]
-
-  private var visiblePills: [AgentPill] {
-    Array(pills.prefix(NotchAgentStackMetrics.maxAgents))
-  }
-
-  var body: some View {
-    NotchOmiMark(dotColors: visiblePills.map { NotchAgentStatusGroup(status: $0.status).color })
-      .contentShape(Rectangle())
-  }
 }
 
 /// The expanded agent rows live below the fixed notch header. Their status marks

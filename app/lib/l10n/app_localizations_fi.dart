@@ -744,11 +744,6 @@ class AppLocalizationsFi extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Pakettisi uusiutuu $date.';
-  }
-
-  @override
   String get basicPlan => 'Ilmaispaketti';
 
   @override
@@ -1466,7 +1461,7 @@ class AppLocalizationsFi extends AppLocalizations {
   String get payYourSttProvider => 'Käytä omia vapaasti. Maksat vain STT-palveluntarjoajallesi suoraan.';
 
   @override
-  String get freeMinutesMonth => '1 200 ilmaisminuuttia kuukaudessa mukana. Rajoittamaton ';
+  String get freeMinutesMonth => '300 ilmaisminuuttia kuukaudessa mukana. Rajoittamaton ';
 
   @override
   String get omiUnlimited => 'Omi Unlimited';
@@ -2125,16 +2120,16 @@ class AppLocalizationsFi extends AppLocalizations {
   String get editMemory => '✏️ Muokkaa muistia';
 
   @override
-  String get pinAsBaseline => 'Pin as Baseline';
+  String get pinAsBaseline => 'Kiinnitä perustaksi';
 
   @override
-  String get unpinAsBaseline => 'Unpin from Baseline';
+  String get unpinAsBaseline => 'Irrota perustasta';
 
   @override
-  String get baselineMemory => 'Baseline Memory';
+  String get baselineMemory => 'Perusmuisti';
 
   @override
-  String get alwaysInContext => 'Always in context';
+  String get alwaysInContext => 'Aina kontekstissa';
 
   @override
   String get memoryContentHint => 'Pidän jäätelön syömisestä...';
@@ -4706,7 +4701,7 @@ class AppLocalizationsFi extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Ei määritettyä tietojen käyttöoikeutta.';
 
   @override
-  String get basicPlanDescription => '1 200 premium-minuuttia + rajoittamaton laitteella';
+  String get basicPlanDescription => '300 premium-minuuttia + rajoittamaton laitteella';
 
   @override
   String get minutes => 'minuuttia';
@@ -5998,7 +5993,7 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get premiumMinutesInfo =>
-      '1 200 premium-minuuttia/kk. Laitteella-välilehti tarjoaa rajattoman ilmaisen puheentunnistuksen.';
+      '300 premium-minuuttia/kk. Laitteella-välilehti tarjoaa rajattoman ilmaisen puheentunnistuksen.';
 
   @override
   String get viewUsage => 'Näytä käyttö';
@@ -6080,7 +6075,7 @@ class AppLocalizationsFi extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1 200 premium-minuuttia/kk. Laitteella-välilehti tarjoaa rajoittamattoman ilmaisen transkription. ';
+      '300 premium-minuuttia/kk. Laitteella-välilehti tarjoaa rajoittamattoman ilmaisen transkription. ';
 
   @override
   String get audioProcessedLocally =>
@@ -9772,4 +9767,77 @@ class AppLocalizationsFi extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Mikrofoniin ei voitu muodostaa yhteyttä. Varmista, että se on yhdistetty iPhonen asetuksissa.';
+
+  @override
+  String get syncStatusTooOld => 'Liian vanha synkronoitavaksi — Omi ei voi hyväksyä sitä';
+
+  @override
+  String get planSheetChooseYourPlan => 'Valitse tilauksesi ja avaa rajaton Omi.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Saatavilla Macilla, mobiilissa ja verkossa';
+
+  @override
+  String get popularBadge => 'SUOSITTU';
+
+  @override
+  String get worksOnDesktop => 'Toimii tietokoneella';
+
+  @override
+  String get noDesktopAccess => 'Ei toimi tietokoneella';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months kuukautta / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count kuukautta ilmaiseksi',
+      one: '1 kuukausi ilmaiseksi',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi on ilmainen, mutta ilmaisversiossa on rajoituksia, jotka vaikuttavat kokemukseesi:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5–7 sekunnin viive (ei reaaliaikainen)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Vaihda ilmaisversioon';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Hanki ilmainen rajaton käyttöoikeus';
+
+  @override
+  String get shareDataForTraining => 'Jaa dataa koulutukseen';
+
+  @override
+  String get yourRequestUnderReview => 'Pyyntösi on käsittelyssä';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Päivitys vaaditaan';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage => 'Asenna uusin Omi-sovellus jatkaaksesi tilin siirron jälkeen.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Siirto käynnissä';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Tiliäsi siirretään. Tuoteominaisuudet on keskeytetty, kunnes siirto valmistuu.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Tilisi on huollossa siirron peruutuksen jälkeen. Uudempaa dataa voi olla eristettynä.';
+
+  @override
+  String get accountCutoverOpenStore => 'Avaa kauppa';
 }

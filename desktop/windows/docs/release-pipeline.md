@@ -84,12 +84,40 @@ The bump must not re-trigger the workflow. Three independent guards:
 
 ### Auto-update
 
-`electron-updater` (see `src/main/updater.ts`) reads the feed configured in
-`electron-builder.config.mjs` (`publish:` → GitHub `BasedHardware/omi`, `releaseType:
-release`). Because the workflow marks builds **prerelease**, they are *not*
-auto-pushed to installed apps — users download betas manually. Promoting a build
-to stable (flipping its GitHub release from prerelease to release) is what makes
-`electron-updater` serve it. This matches the macOS beta/stable split.
+`electron-updater` (see `src/main/updater.ts`) does not use GitHub's
+repository-wide `/releases/latest` endpoint in production. This repository also
+publishes macOS releases, so that endpoint can point a Windows client at a macOS
+tag with no `latest.yml`. Before every check, the app asks
+`/v2/desktop/update-feed/windows` for the selected Windows channel and points the
+generic provider at that immutable release directory.
+
+**Deploy before ship.** That backend route must be live on `api.omi.me` before
+any Windows build that contains the client change is published. The client fails
+closed when the route is missing (intentional — it must not fall back to the
+broken repository-wide provider). `desktop_windows_release.yml` runs
+`.github/scripts/probe_windows_update_feed.py` against production **before**
+tagging so a missing deploy cannot mint another broken cohort. The probe covers
+both channels that real clients can request (`beta` and `stable`), because the
+backend deliberately does not fall stable through to beta. If the probe
+fails with "missing /v2/desktop/update-feed/windows", deploy backend `main` via
+`gcp_backend.yml` (`environment=prod`, `deploy_targets=cloud-run-only`, and a
+release-eligible main SHA) and re-run the release.
+
+**Break-glass.** If the probe itself is broken or the GitHub runner cannot reach
+`api.omi.me`, supply a `bypass_update_feed_probe_reason` that contains a
+tracking-issue URL or short rationale **and** the literal phrase
+`I ACKNOWLEDGE THE ROUTE IS REQUIRED` when dispatching the workflow. The
+sentinel must be present or the probe runs regardless. That skips the probe for
+that one release while leaving the reason in the run log for audit. Do not use
+this to ship when the route is genuinely absent.
+
+The workflow marks new Windows builds **prerelease**. Stable users receive only
+releases that have been promoted by clearing that flag; beta users receive the
+beta release and safely fall back to stable while the beta slot is empty after a
+promotion. A stable check never falls through to beta. The `publish:` block in
+`electron-builder.config.mjs` remains necessary for electron-builder to generate
+`latest.yml` and packaged update config, but it is replaced at runtime before a
+production check. `OMI_UPDATER_DEV=1` keeps using `dev-app-update.yml`.
 
 > The workflow publishes to the repository it runs in (`${{ github.repository }}`),
 > so on `BasedHardware/omi` the release lands exactly where the feed points. On a

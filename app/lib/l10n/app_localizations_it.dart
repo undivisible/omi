@@ -750,11 +750,6 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Il tuo piano si rinnova il $date.';
-  }
-
-  @override
   String get basicPlan => 'Piano Gratuito';
 
   @override
@@ -1474,7 +1469,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get payYourSttProvider => 'Usa Omi liberamente. Paghi solo il tuo provider STT direttamente.';
 
   @override
-  String get freeMinutesMonth => '1.200 minuti gratuiti/mese inclusi. Illimitato con ';
+  String get freeMinutesMonth => '300 minuti gratuiti/mese inclusi. Illimitato con ';
 
   @override
   String get omiUnlimited => 'Omi Unlimited';
@@ -2136,16 +2131,16 @@ class AppLocalizationsIt extends AppLocalizations {
   String get editMemory => '✏️ Modifica memoria';
 
   @override
-  String get pinAsBaseline => 'Pin as Baseline';
+  String get pinAsBaseline => 'Fissa come base';
 
   @override
-  String get unpinAsBaseline => 'Unpin from Baseline';
+  String get unpinAsBaseline => 'Rimuovi dalla base';
 
   @override
-  String get baselineMemory => 'Baseline Memory';
+  String get baselineMemory => 'Memoria di base';
 
   @override
-  String get alwaysInContext => 'Always in context';
+  String get alwaysInContext => 'Sempre nel contesto';
 
   @override
   String get memoryContentHint => 'Mi piace mangiare il gelato...';
@@ -4736,7 +4731,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Nessun accesso ai dati specifico configurato.';
 
   @override
-  String get basicPlanDescription => '1.200 minuti premium + illimitato sul dispositivo';
+  String get basicPlanDescription => '300 minuti premium + illimitato sul dispositivo';
 
   @override
   String get minutes => 'minuti';
@@ -6033,7 +6028,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get premiumMinutesInfo =>
-      '1.200 minuti premium/mese. La scheda Su dispositivo offre trascrizione gratuita illimitata.';
+      '300 minuti premium/mese. La scheda Su dispositivo offre trascrizione gratuita illimitata.';
 
   @override
   String get viewUsage => 'Visualizza utilizzo';
@@ -6117,7 +6112,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1.200 minuti premium/mese. La scheda Sul dispositivo offre trascrizione gratuita illimitata. ';
+      '300 minuti premium/mese. La scheda Sul dispositivo offre trascrizione gratuita illimitata. ';
 
   @override
   String get audioProcessedLocally =>
@@ -9828,4 +9823,78 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Impossibile connettersi a quel microfono. Assicurati che sia connesso nelle Impostazioni dell\'iPhone.';
+
+  @override
+  String get syncStatusTooOld => 'Troppo vecchia per la sincronizzazione — Omi non può accettarla';
+
+  @override
+  String get planSheetChooseYourPlan => 'Scegli il tuo piano per sbloccare Omi senza limiti.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Disponibile su Mac, mobile e web';
+
+  @override
+  String get popularBadge => 'POPOLARE';
+
+  @override
+  String get worksOnDesktop => 'Funziona su desktop';
+
+  @override
+  String get noDesktopAccess => 'Non funziona su desktop';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months mesi / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count mesi gratis',
+      one: '1 mese gratis',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro =>
+      'Omi è gratuito, ma la versione gratuita ha limiti che influiscono sulla tua esperienza:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => 'Ritardo di 5-7 secondi (non in tempo reale)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Passa alla versione gratuita';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Ottieni accesso illimitato gratuito';
+
+  @override
+  String get shareDataForTraining => 'Condividi i dati per l\'addestramento';
+
+  @override
+  String get yourRequestUnderReview => 'La tua richiesta è in revisione';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Aggiornamento richiesto';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Installa l\'ultima app Omi per continuare dopo la migrazione dell\'account.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Migrazione in corso';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Il tuo account è in migrazione. Le funzioni del prodotto sono in pausa fino al termine della migrazione.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Il tuo account è in manutenzione dopo un rollback della migrazione. Alcuni dati più recenti potrebbero essere isolati.';
+
+  @override
+  String get accountCutoverOpenStore => 'Apri store';
 }

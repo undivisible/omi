@@ -97,10 +97,10 @@ class PostHogManager {
     log("PostHog: Identified user \(uid)")
   }
 
-  /// Set a specific user property
-  func setUserProperty(key: String, value: Any) {
+  /// Set person properties in one identify call.
+  func setUserProperties(_ properties: [String: Any]) {
     guard isInitialized else { return }
-    PostHogSDK.shared.identify(PostHogSDK.shared.getDistinctId(), userProperties: [key: value])
+    PostHogSDK.shared.identify(PostHogSDK.shared.getDistinctId(), userProperties: properties)
   }
 
   // MARK: - Event Tracking
@@ -279,23 +279,6 @@ extension PostHogManager {
 
   func monitoringStopped() {
     track("Monitoring Stopped")
-  }
-
-  func distractionDetected(app: String, windowTitle: String?) {
-    track(
-      "Distraction Detected",
-      properties: [
-        "app": app,
-        "has_window_title": !(windowTitle?.isEmpty ?? true),
-      ])
-  }
-
-  func focusRestored(app: String) {
-    track(
-      "Focus Restored",
-      properties: [
-        "app": app
-      ])
   }
 
   // MARK: - Recording Events
@@ -518,10 +501,9 @@ extension PostHogManager {
   // but it actually tracks when a conversation/recording is created, not a "memory".
   // This matches Flutter's naming for analytics consistency.
 
-  func conversationCreated(conversationId: String, source: String, durationSeconds: Int? = nil) {
+  func conversationCreated(conversationId _: String, source: String, durationSeconds: Int? = nil) {
     var properties: [String: Any] = [
-      "conversation_id": conversationId,
-      "source": source,
+      "source": source
     ]
     if let duration = durationSeconds {
       properties["duration_seconds"] = duration
@@ -722,23 +704,6 @@ extension PostHogManager {
 
   // MARK: - Proactive Assistant Events (Desktop-specific)
 
-  func focusAlertShown(app: String) {
-    track(
-      "Focus Alert Shown",
-      properties: [
-        "app": app
-      ])
-  }
-
-  func focusAlertDismissed(app: String, action: String) {
-    track(
-      "Focus Alert Dismissed",
-      properties: [
-        "app": app,
-        "action": action,
-      ])
-  }
-
   func taskExtracted(taskCount: Int) {
     track(
       "Task Extracted",
@@ -828,10 +793,97 @@ extension PostHogManager {
     )
   }
 
-  func insightGenerated(category: String?) {
+  // MARK: - Suggestion Assistant Telemetry
+
+  func suggestionAssistantSettingChanged(setting: SuggestionAssistantTelemetry.Setting, value: Bool) {
+    track(
+      SuggestionAssistantTelemetry.settingChangedEventName,
+      properties: SuggestionAssistantTelemetry.settingChangedPayload(setting: setting, value: value)
+    )
+  }
+
+  func suggestionAssistantGateOutcome(_ outcome: SuggestionAssistantTelemetry.GateOutcome) {
+    track(
+      SuggestionAssistantTelemetry.gateOutcomeEventName,
+      properties: SuggestionAssistantTelemetry.gateOutcomePayload(outcome)
+    )
+  }
+
+  func suggestionAssistantEvaluationStarted(
+    identity: SuggestionAssistantTelemetry.Identity,
+    shape: SuggestionAssistantTelemetry.EvaluationShape
+  ) {
+    track(
+      SuggestionAssistantTelemetry.evaluationStartedEventName,
+      properties: SuggestionAssistantTelemetry.evaluationStartedPayload(identity: identity, shape: shape)
+    )
+  }
+
+  func suggestionAssistantEvaluationCompleted(
+    identity: SuggestionAssistantTelemetry.Identity,
+    shape: SuggestionAssistantTelemetry.EvaluationShape,
+    latency: TimeInterval,
+    producedSuggestion: Bool
+  ) {
+    track(
+      SuggestionAssistantTelemetry.evaluationCompletedEventName,
+      properties: SuggestionAssistantTelemetry.evaluationCompletedPayload(
+        identity: identity,
+        shape: shape,
+        latency: latency,
+        producedSuggestion: producedSuggestion
+      )
+    )
+  }
+
+  func suggestionAssistantEvaluationFailed(
+    identity: SuggestionAssistantTelemetry.Identity,
+    shape: SuggestionAssistantTelemetry.EvaluationShape,
+    latency: TimeInterval
+  ) {
+    track(
+      SuggestionAssistantTelemetry.evaluationFailedEventName,
+      properties: SuggestionAssistantTelemetry.evaluationFailedPayload(
+        identity: identity,
+        shape: shape,
+        latency: latency
+      )
+    )
+  }
+
+  func suggestionAssistantDeliveryOutcome(
+    _ outcome: SuggestionAssistantTelemetry.DeliveryOutcome,
+    identity: SuggestionAssistantTelemetry.NotificationIdentity
+  ) {
+    track(
+      SuggestionAssistantTelemetry.deliveryOutcomeEventName,
+      properties: SuggestionAssistantTelemetry.deliveryOutcomePayload(outcome, identity: identity)
+    )
+  }
+
+  func insightGenerated(category: String?, deliveryID: UUID? = nil) {
     var properties: [String: Any] = [:]
-    if let cat = category { properties["category"] = cat }
+    if let cat = InsightAssistantTelemetry.boundedCategory(category) { properties["category"] = cat }
+    if let deliveryID { properties["delivery_id"] = deliveryID.uuidString }
     track("Advice Generated", properties: properties.isEmpty ? nil : properties)
+  }
+
+  func insightAssistantDeliveryOutcome(
+    _ outcome: InsightAssistantTelemetry.Outcome,
+    reason: InsightAssistantTelemetry.Reason,
+    deliveryID: UUID,
+    surface: InsightAssistantTelemetry.Surface? = nil
+  ) {
+    let identity = InsightAssistantTelemetry.DeliveryIdentity(deliveryID: deliveryID)
+    track(
+      InsightAssistantTelemetry.deliveryOutcomeEventName,
+      properties: InsightAssistantTelemetry.deliveryOutcomePayload(
+        outcome,
+        reason: reason,
+        identity: identity,
+        surface: surface
+      )
+    )
   }
 
   // MARK: - Apps Events
@@ -919,40 +971,84 @@ extension PostHogManager {
 
   // MARK: - Notification Events
 
-  func notificationSent(notificationId: String, title: String, assistantId: String, surface: String) {
+  func notificationSent(
+    notificationId: String,
+    title: String,
+    assistantId: String,
+    surface: String,
+    suggestionIdentity: SuggestionAssistantTelemetry.NotificationIdentity? = nil
+  ) {
+    var properties = notificationProperties(
+      notificationId: notificationId,
+      title: title,
+      assistantId: assistantId,
+      surface: surface
+    )
+    appendSuggestionNotificationIdentity(suggestionIdentity, to: &properties)
     track(
       "Notification Sent",
-      properties: [
-        "notification_id": notificationId,
-        "title_length": title.count,
-        "has_title": !title.isEmpty,
-        "assistant_id": assistantId,
-        "notification_surface": surface,
-      ])
+      properties: properties)
   }
 
-  func notificationClicked(notificationId: String, title: String, assistantId: String, surface: String) {
+  func notificationClicked(
+    notificationId: String,
+    title: String,
+    assistantId: String,
+    surface: String,
+    suggestionIdentity: SuggestionAssistantTelemetry.NotificationIdentity? = nil
+  ) {
+    var properties = notificationProperties(
+      notificationId: notificationId,
+      title: title,
+      assistantId: assistantId,
+      surface: surface
+    )
+    appendSuggestionNotificationIdentity(suggestionIdentity, to: &properties)
     track(
       "Notification Clicked",
-      properties: [
-        "notification_id": notificationId,
-        "title_length": title.count,
-        "has_title": !title.isEmpty,
-        "assistant_id": assistantId,
-        "notification_surface": surface,
-      ])
+      properties: properties)
   }
 
-  func notificationDismissed(notificationId: String, title: String, assistantId: String, surface: String) {
+  func notificationDismissed(
+    notificationId: String,
+    title: String,
+    assistantId: String,
+    surface: String,
+    suggestionIdentity: SuggestionAssistantTelemetry.NotificationIdentity? = nil
+  ) {
+    var properties = notificationProperties(
+      notificationId: notificationId,
+      title: title,
+      assistantId: assistantId,
+      surface: surface
+    )
+    appendSuggestionNotificationIdentity(suggestionIdentity, to: &properties)
     track(
       "Notification Dismissed",
-      properties: [
-        "notification_id": notificationId,
-        "title_length": title.count,
-        "has_title": !title.isEmpty,
-        "assistant_id": assistantId,
-        "notification_surface": surface,
-      ])
+      properties: properties)
+  }
+
+  private func notificationProperties(
+    notificationId: String,
+    title: String,
+    assistantId: String,
+    surface: String
+  ) -> [String: Any] {
+    [
+      "notification_id": notificationId,
+      "title_length": title.count,
+      "has_title": !title.isEmpty,
+      "assistant_id": assistantId,
+      "notification_surface": surface,
+    ]
+  }
+
+  private func appendSuggestionNotificationIdentity(
+    _ identity: SuggestionAssistantTelemetry.NotificationIdentity?,
+    to properties: inout [String: Any]
+  ) {
+    guard let identity else { return }
+    properties.merge(SuggestionAssistantTelemetry.notificationPayload(identity)) { _, new in new }
   }
 
   func notificationWillPresent(notificationId: String, title: String) {

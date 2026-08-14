@@ -746,11 +746,6 @@ class AppLocalizationsDa extends AppLocalizations {
   }
 
   @override
-  String renewsOn(String date) {
-    return 'Din plan fornyes den $date.';
-  }
-
-  @override
   String get basicPlan => 'Gratis plan';
 
   @override
@@ -1469,7 +1464,7 @@ class AppLocalizationsDa extends AppLocalizations {
   String get payYourSttProvider => 'Betal din STT-udbyder';
 
   @override
-  String get freeMinutesMonth => 'Gratis minutter/måned';
+  String get freeMinutesMonth => '300 gratis minutter/måned inkluderet. Ubegrænset med ';
 
   @override
   String get omiUnlimited => 'Omi Unlimited';
@@ -2110,16 +2105,16 @@ class AppLocalizationsDa extends AppLocalizations {
   String get editMemory => '✏️ Rediger hukommelse';
 
   @override
-  String get pinAsBaseline => 'Pin as Baseline';
+  String get pinAsBaseline => 'Fastgør som baseline';
 
   @override
-  String get unpinAsBaseline => 'Unpin from Baseline';
+  String get unpinAsBaseline => 'Frigør fra baseline';
 
   @override
-  String get baselineMemory => 'Baseline Memory';
+  String get baselineMemory => 'Baseline-hukommelse';
 
   @override
-  String get alwaysInContext => 'Always in context';
+  String get alwaysInContext => 'Altid i kontekst';
 
   @override
   String get memoryContentHint => 'Indtast hukommelsesindhold';
@@ -4694,7 +4689,7 @@ class AppLocalizationsDa extends AppLocalizations {
   String get noSpecificDataAccessConfigured => 'Ingen specifik dataadgang konfigureret.';
 
   @override
-  String get basicPlanDescription => '1.200 premium minutter + ubegrænset on-device';
+  String get basicPlanDescription => '300 premium minutter + ubegrænset on-device';
 
   @override
   String get minutes => 'minutter';
@@ -5983,8 +5978,7 @@ class AppLocalizationsDa extends AppLocalizations {
   String get cloudProvider => 'Cloud-udbyder';
 
   @override
-  String get premiumMinutesInfo =>
-      '1.200 premium minutter/måned. Lokal-fanen tilbyder ubegrænset gratis transskription.';
+  String get premiumMinutesInfo => '300 premium minutter/måned. Lokal-fanen tilbyder ubegrænset gratis transskription.';
 
   @override
   String get viewUsage => 'Se forbrug';
@@ -6065,7 +6059,7 @@ class AppLocalizationsDa extends AppLocalizations {
 
   @override
   String get premiumMinutesMonth =>
-      '1.200 premium minutter/måned. Fanen På enheden tilbyder ubegrænset gratis transskription. ';
+      '300 premium minutter/måned. Fanen På enheden tilbyder ubegrænset gratis transskription. ';
 
   @override
   String get audioProcessedLocally => 'Lyd behandles lokalt. Fungerer offline, mere privat, men bruger mere batteri.';
@@ -9758,4 +9752,77 @@ class AppLocalizationsDa extends AppLocalizations {
   @override
   String get rayBanMetaMicPickerConnectError =>
       'Der kunne ikke oprettes forbindelse til mikrofonen. Sørg for, at den er tilsluttet i iPhone-indstillinger.';
+
+  @override
+  String get syncStatusTooOld => 'For gammel til at synkronisere — Omi kan ikke acceptere den';
+
+  @override
+  String get planSheetChooseYourPlan => 'Vælg din plan for at låse op for ubegrænset Omi.';
+
+  @override
+  String get availableOnMacMobileWeb => 'Tilgængelig på Mac, mobil og web';
+
+  @override
+  String get popularBadge => 'POPULÆR';
+
+  @override
+  String get worksOnDesktop => 'Virker på computer';
+
+  @override
+  String get noDesktopAccess => 'Virker ikke på computer';
+
+  @override
+  String annualBillingSummary(int months, String price) {
+    return '$months måneder / $price';
+  }
+
+  @override
+  String monthsFreeBadge(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count måneder gratis',
+      one: '1 måned gratis',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get freemiumLimitsIntro => 'Omi er gratis, men gratisversionen har begrænsninger, der påvirker din oplevelse:';
+
+  @override
+  String get downgradeLimitDelayNotRealTime => '5-7 sekunders forsinkelse (ikke i realtid)';
+
+  @override
+  String get downgradeToFreemiumAction => 'Skift til gratisversionen';
+
+  @override
+  String get getFreeUnlimitedAccess => 'Få gratis ubegrænset adgang';
+
+  @override
+  String get shareDataForTraining => 'Del data til træning';
+
+  @override
+  String get yourRequestUnderReview => 'Din anmodning er under behandling';
+
+  @override
+  String get accountCutoverUpdateRequiredTitle => 'Opdatering påkrævet';
+
+  @override
+  String get accountCutoverUpdateRequiredMessage =>
+      'Installer den seneste Omi-app for at fortsætte efter kontomigreringen.';
+
+  @override
+  String get accountCutoverMigrationInProgressTitle => 'Migrering i gang';
+
+  @override
+  String get accountCutoverMigrationInProgressMessage =>
+      'Din konto migreres. Produktfunktioner er sat på pause, indtil migreringen er færdig.';
+
+  @override
+  String get accountCutoverMigrationRollbackMessage =>
+      'Din konto er under vedligeholdelse efter en migrerings-rollback. Nyere data kan være isoleret.';
+
+  @override
+  String get accountCutoverOpenStore => 'Åbn butik';
 }
