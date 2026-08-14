@@ -120,6 +120,24 @@ pub fn select_execution_mode(prompt: &str, requested: Option<ExecutionMode>) -> 
     }
 }
 
+/// Resolves the model for a query frame.
+///
+/// Priority: an explicit per-query `modelProfile` wins, then the session's
+/// stored execution profile (honoring `migrate_session_execution_profile`),
+/// then the prompt/execution-mode heuristic.
+pub fn resolve_query_model(
+    query_model_profile: Option<String>,
+    session_model_profile: Option<String>,
+    execution_mode: ExecutionMode,
+) -> String {
+    query_model_profile
+        .or(session_model_profile)
+        .unwrap_or_else(|| match execution_mode {
+            ExecutionMode::Fast => "omi-fast".into(),
+            ExecutionMode::Deep => "omi-deep".into(),
+        })
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SubagentId(String);
 
@@ -420,6 +438,42 @@ mod tests {
         assert_eq!(
             select_execution_mode("use deep mode for this", Some(ExecutionMode::Fast)),
             ExecutionMode::Fast
+        );
+    }
+
+    #[test]
+    fn query_model_honors_migrated_session_profile_before_heuristic() {
+        assert_eq!(
+            resolve_query_model(None, Some("omi-deep".into()), ExecutionMode::Fast),
+            "omi-deep"
+        );
+        assert_eq!(
+            resolve_query_model(None, Some("omi-fast".into()), ExecutionMode::Deep),
+            "omi-fast"
+        );
+    }
+
+    #[test]
+    fn query_model_prefers_explicit_override_over_session_profile() {
+        assert_eq!(
+            resolve_query_model(
+                Some("omi-flash-probe".into()),
+                Some("omi-deep".into()),
+                ExecutionMode::Fast
+            ),
+            "omi-flash-probe"
+        );
+    }
+
+    #[test]
+    fn query_model_falls_back_to_heuristic_without_profile() {
+        assert_eq!(
+            resolve_query_model(None, None, ExecutionMode::Fast),
+            "omi-fast"
+        );
+        assert_eq!(
+            resolve_query_model(None, None, ExecutionMode::Deep),
+            "omi-deep"
         );
     }
 
