@@ -1,0 +1,124 @@
+# Differential vectors: one probe per line, executed identically against the
+# C++ and Rust implementations of the same C ABI. "-" means null pointer.
+# strip <path>
+strip /v1/tasks?limit=2
+strip /v1/conversations#frag
+strip /v1/device-sessions/id/transcribe?retry=1
+strip /?a=b
+strip #
+strip ?
+strip
+strip /v1/tasks
+# capture <path>
+capture /v1/live/sessions
+capture /v1/live/sessions?retry=1
+capture /v1/live/sessions-extra
+capture /v1/chat-messages
+capture /v1/chat-messages?limit=50
+capture /v1/chat-generations/id/events
+capture /v1/chat-attachments
+capture /v1/chat-attachments/id/complete
+capture /v1/device-sessions
+capture /v1/device-sessions/id/audio
+capture /v1/device-sessions-extra
+capture /v1/settings
+capture /v1/conversations
+capture /v1/memories
+capture /v1/tasks
+capture /v1/tasks/ops
+capture /v1/tasks/ops?op=complete
+capture /v1/tasks/one
+capture /v1/users/me
+capture /v1/conversations#keep
+capture /v1/chat-generations/
+capture /v1/chat-generations
+capture /v1/device-sessions/
+capture /v1/device-sessions//transcribe
+capture /v1/settings#x
+# timeout <method> <path>
+timeout POST /v1/device-sessions/id/transcribe
+timeout POST /v1/device-sessions/id/transcribe?retry=1
+timeout GET /v1/device-sessions/id/transcribe
+timeout POST /v1/device-sessions/id/complete
+timeout POST /v1/device-sessions//transcribe
+timeout POST /v1/live/sessions
+timeout POST /v1/device-sessions/11111111-2222-3333-4444-555555555555/transcribe
+timeout POST /v1/device-sessions/id/transcribe#frag
+timeout PATCH /v1/device-sessions/id/transcribe
+timeout POST /v1/device-sessions/a/b/transcribe
+timeout POST /v2/device-sessions/id/transcribe
+timeout post /v1/device-sessions/id/transcribe
+# example <method> <path>
+example GET /v1/tasks?limit=2
+example GET /v1/conversations
+example GET /v1/memories
+example GET /v1/settings
+example GET /v1/chat-messages?limit=50
+example GET /v1/device-sessions/ownership
+example GET /v1/device-sessions/11111111-2222-3333-4444-555555555555
+example GET /v1/device-sessions/11111111-2222-3333-4444-555555555555/transcript
+example POST /v1/device-sessions
+example POST /v1/device-sessions/11111111-2222-3333-4444-555555555555/audio
+example POST /v1/tasks/ops
+example DELETE /v1/tasks/ops
+example POST /v1/tasks
+example POST /v1/chat-messages
+example GET /v1/chat-generations/one/events
+example POST /v1/chat-attachments
+example POST /v1/device-sessions/ownership
+example GET /v1/device-sessions//transcript
+example GET /v1/device-sessions/id/audio
+example GET /v1/device-sessions/id/transcribe
+example POST /v1/device-sessions/id/transcript
+example PUT /v1/device-sessions/id/audio
+example GET /v1/tasks/ops
+# loopback <host>
+loopback localhost
+loopback LOCALHOST
+loopback 127.0.0.1
+loopback ::1
+loopback [::1]
+loopback [127.0.0.1]
+loopback localhostx
+loopback example.com
+# cloud <host>
+cloud api.omi.me
+cloud API.OMI.ME
+cloud [api.omi.me]
+cloud api.omi.me.
+cloud omi.me
+cloud api.omi.me.evil.com
+# allowed <host>
+allowed synthetic.workers.dev
+allowed workers.dev
+allowed omi-platform-dev-abcdef012345-uc.a.run.app
+allowed omi-platform-dev-attacker.a.run.app
+allowed untrusted.invalid
+allowed [a.workers.dev]
+allowed SYNTHETIC.WORKERS.DEV
+allowed api.omi.me
+allowed localhost
+allowed evil.workers.dev.example.com
+allowed .workers.dev
+# plane <stored|-> <stamped>
+plane - 1
+plane - 0
+plane new 0
+plane old 1
+plane unexpected 1
+plane NEW 1
+# crc <hexbytes|->  (IEEE CRC-32; null/empty data returns 0)
+crc -
+crc 313233343536373839
+crc 68656c6c6f
+crc 00
+crc ffffffffffffffff
+# frame <rawhex> <max_out>
+frame aa5568656c6c6f06a13081e5 64
+frame aa5568656c6c6f06a13081e5 4
+frame aa5568656c6c6f06a13081e5 0
+frame 005568656c6c6f06a13081e5 64
+frame aa5568656c6c6f06deadbeef 64
+frame aa55 64
+frame aa551234567890 64
+frame aa55c2b1 64

@@ -1,0 +1,19 @@
+[package]
+name = "omi-native-core-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+description = "Spike: Rust re-implementation of native-core's backend-policy and packet-checksum modules, C ABI compatible (link-time drop-in)"
+publish = false
+
+[lib]
+name = "omi_native_core_rs"
+crate-type = ["staticlib", "rlib"]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"
