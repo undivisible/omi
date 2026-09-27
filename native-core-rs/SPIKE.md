@@ -171,3 +171,80 @@ the Rust direction anyway (the repo already ships a Rust GPUI simulator in
 harness as the safety net. If adopted, start with the policy module as
 proven here; `omi_get_native_capabilities`, recording validators, and the
 http planner/executor are mechanical follow-ups.
+
+## 7. Harness engineering: rx4 (rotary) + eqts
+
+The verification harness itself is now built on two first-party crates from
+`tschk` (both no-telemetry; licenses noted below):
+
+- **`rx4` 0.7.2 (rotary)** — the agent-harness engine. `spike/harness` is a
+  host that registers five parity tools on a `ToolRegistry` and executes them
+  through the same engine the agent loop uses — deterministically, with
+  `default-features = false` (no builtin tools, no providers, no network)
+  and a host embedding of `Scope::Research` + `Policy::read_only()` (the
+  harness never writes inside the workspace; scratch output goes to TMPDIR).
+  Tools: `differential_fixed` (committed 112-probe run.sh), 
+  `differential_generated` (seeded pseudo-random probes, no RNG dependency),
+  `cpp_host_suites` (the four C++ suites), `rust_parity_tests` (`cargo
+  test`), `ts_bridge_check` (below).
+- **`eqts` 0.2.1** — one Rust API for TypeScript. The same crate is also a
+  `cdylib`; `#[eqts::export]` exposes `harness_version`, `null_battery`, and
+  `parity_probe` (the Rust side of every vector, formatted exactly like
+  `driver.cpp`). `cargo eqts build --target bun` generates a Bun adapter
+  (`dist/bun`, `bun:ffi` dlopen over the shared C ABI), and
+  `spike/harness/ts/harness.ts` diffs C++ driver output against Rust probes
+  executed from TypeScript.
+
+Architecture:
+
+```
++--------------------------------------------------------------+
+| omi-spike-harness (rx4 host, no providers/network)            |
+|   ToolRegistry -> execute(differential_fixed | _generated ...) |
++-----------------|--------------------------------------------+
+                  | links
+        +---------+-----------+
+        |                     |
+  omi-native-core-rs    eqts exports (cdylib)
+  (staticlib parity)    harness_version / null_battery / parity_probe
+        |                     | cargo eqts build --target bun
+        |                     v
+        |               dist/bun (bun:ffi adapter)
+        |                     |
+        |               ts/harness.ts (Bun)
+        |                     | diff
+        +----> C++ driver (driver.cpp over vectors.txt) <----+
+```
+
+Real run (`cargo run` in `spike/harness`; overrides `count seed`):
+
+```
+== differential_fixed ==
+differential: PASS — 112 probes + null battery identical between C++ and Rust
+== differential_generated ==
+800 seeded probes (seed 7): C++ vs Rust outputs identical
+== cpp_host_suites ==
+test_omi_native_boundary: PASS Test Summary: 13 run, 0 failed.
+test_omi_backend_policy: PASS omi_backend_policy tests passed
+test_omi_backend_http: PASS omi_backend_http tests passed
+test_omi_backend_recording: PASS omi_backend_recording tests passed
+== rust_parity_tests ==
+test result: ok. 8 passed
+== ts_bridge_check ==
+eqts bridge: 123 lines identical (C++ driver vs Rust probes via eqts/Bun)
+harness verdict: PASS
+```
+
+Notes for productizing this shape:
+
+- `eqts` ships `default-features = false` here: the default `node-napi`
+  feature pulls `napi-derive`, which fails to compile against a
+  `convert_case` duplicate in broader graphs; the Bun adapter only needs the
+  shared C ABI, so napi is unnecessary. Worth an upstream fix pin.
+- `parity_probe` deliberately reuses the driver's line format, so the TS
+  bridge, the C++ driver, and the Rust staticlib all speak one comparable
+  wire — the harness can be a CI gate without any shell glue.
+- Licenses: rx4 MPL-2.0 (and `#![forbid(unsafe_code)]`), eqts ISC. Both are
+  first-party (`undivisible` on crates.io). No provider feature is enabled,
+  so the harness makes no network calls.
+

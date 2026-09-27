@@ -1,0 +1,28 @@
+[package]
+name = "omi-spike-harness"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+description = "Spike harness: rx4 (rotary) engine driving native-core C++/Rust parity checks; eqts exposes the Rust probes to TypeScript/Bun"
+publish = false
+
+[lib]
+name = "omi_spike_harness"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "omi-spike-harness"
+path = "src/main.rs"
+
+[dependencies]
+# Harness engine (rotary). No builtin tools, no providers, no network: the
+# harness registers its own deterministic tools and runs them directly.
+rx4 = { version = "0.7", default-features = false }
+# Rust -> TypeScript bridge so the Bun side of the repo can drive the probes.
+# The Bun adapter uses the shared C ABI (bun:ffi dlopen of the cdylib), so the
+# default node-napi feature is not needed.
+eqts = { version = "0.2", default-features = false }
+omi-native-core-rs = { path = "../.." }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
