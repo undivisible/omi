@@ -18,11 +18,16 @@ path = "src/main.rs"
 [dependencies]
 # Harness engine (rotary). No builtin tools, no providers, no network: the
 # harness registers its own deterministic tools and runs them directly.
-rx4 = { version = "0.7", default-features = false }
+rx4 = { version = "0.7.4", default-features = false }
 # Rust -> TypeScript bridge so the Bun side of the repo can drive the probes.
 # The Bun adapter uses the shared C ABI (bun:ffi dlopen of the cdylib), so the
 # default node-napi feature is not needed.
-eqts = { version = "0.2", default-features = false }
+#
+# Git override until the convert_case-skew fix ships in an eqts release
+# (tschk/eqts#7: pin napi-derive to the fixed 3.6.9 lineage + a pinned
+# napi-derive-backend so the node-napi graph keeps a single convert_case).
+# Drop the git/branch keys once eqts >= 0.2.2 is on crates.io.
+eqts = { version = "0.2", default-features = false, git = "https://github.com/tschk/eqts", branch = "fix/napi-derive-convert-case-skew" }
 omi-native-core-rs = { path = "../.." }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

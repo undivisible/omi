@@ -193,8 +193,7 @@ dependencies = [
 [[package]]
 name = "eqts"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e37e0fc5169a21c2f0b99dbcc57f2c5b44c1264c46c68d63568b658016be10"
+source = "git+https://github.com/tschk/eqts?branch=fix%2Fnapi-derive-convert-case-skew#456fa2fe45ae89fbc54405549629aab3dd56e80d"
 dependencies = [
  "eqts-macros",
  "futures",
@@ -206,8 +205,7 @@ dependencies = [
 [[package]]
 name = "eqts-macros"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c754e01d6330e78380c390d5515dbb91a3cb66fd78f92eef0143def10263e85"
+source = "git+https://github.com/tschk/eqts?branch=fix%2Fnapi-derive-convert-case-skew#456fa2fe45ae89fbc54405549629aab3dd56e80d"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -177,7 +177,7 @@ http planner/executor are mechanical follow-ups.
 The verification harness itself is now built on two first-party crates from
 `tschk` (both no-telemetry; licenses noted below):
 
-- **`rx4` 0.7.2 (rotary)** — the agent-harness engine. `spike/harness` is a
+- **`rx4` 0.7.4 (rotary)** — the agent-harness engine. `spike/harness` is a
   host that registers five parity tools on a `ToolRegistry` and executes them
   through the same engine the agent loop uses — deterministically, with
   `default-features = false` (no builtin tools, no providers, no network)
@@ -238,9 +238,12 @@ harness verdict: PASS
 Notes for productizing this shape:
 
 - `eqts` ships `default-features = false` here: the default `node-napi`
-  feature pulls `napi-derive`, which fails to compile against a
-  `convert_case` duplicate in broader graphs; the Bun adapter only needs the
-  shared C ABI, so napi is unnecessary. Worth an upstream fix pin.
+  feature pulls `napi-derive`, which failed to compile against a
+  `convert_case` duplicate in broader graphs (nine E0308 errors); the Bun
+  adapter only needs the shared C ABI, so napi is unnecessary. The default
+  stack is now fixed upstream in tschk/eqts#7 (napi-derive 3.6.9 + a pinned
+  napi-derive-backend), which the harness consumes via a git override until
+  the next eqts release publishes.
 - `parity_probe` deliberately reuses the driver's line format, so the TS
   bridge, the C++ driver, and the Rust staticlib all speak one comparable
   wire — the harness can be a CI gate without any shell glue.
